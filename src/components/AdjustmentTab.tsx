@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 
 interface Props {
+  mode: 'unconstrained' | 'constrained';
   adjustmentResult: AdjustmentResult | null;
   config: JobConfig;
   onRunAdjustment: (mode: 'unconstrained' | 'constrained') => void;
@@ -31,6 +32,7 @@ interface Props {
 }
 
 export const AdjustmentTab: React.FC<Props> = ({
+  mode,
   adjustmentResult,
   config,
   onRunAdjustment,
@@ -39,12 +41,8 @@ export const AdjustmentTab: React.FC<Props> = ({
   isLoading,
 }) => {
   const [selectedSubTab, setSelectedSubTab] = useState<'coords' | 'residuals' | 'ellipses'>('coords');
-  const [currentMode, setCurrentMode] = useState<'constrained' | 'unconstrained'>('constrained');
 
-  const handleModeChange = (newMode: 'constrained' | 'unconstrained') => {
-    setCurrentMode(newMode);
-    onRunAdjustment(newMode);
-  };
+  const isFree = mode === 'unconstrained';
 
   return (
     <div className="space-y-6">
@@ -53,63 +51,50 @@ export const AdjustmentTab: React.FC<Props> = ({
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
-              <span className="bg-sky-100 text-sky-800 text-xs font-semibold px-2 py-0.5 rounded">
-                MODÜL 5
+              <span
+                className={`text-[10px] font-extrabold px-2 py-0.5 rounded border uppercase ${
+                  isFree
+                    ? 'bg-purple-100 text-purple-800 border-purple-300'
+                    : 'bg-sky-100 text-sky-800 border-sky-300'
+                }`}
+              >
+                {isFree ? 'Minimal Kısıtlı / İç Tutarlılık' : 'Tam Kısıtlı / CORS Sabit'}
               </span>
               <h2 className="text-base font-bold text-slate-900">
-                3D Gauss-Markov Ağ Dengeleme Motoru (Adjustment - F8)
+                {isFree ? 'Serbest (Zorlamasız) Ağ Dengelemesi' : 'Dayalı (Tam Kısıtlı) Ağ Dengelemesi'}
               </h2>
             </div>
             <p className="text-xs text-slate-500 mt-1">
-              v = A·x - l, P = σ₀²·Σ⁻¹, x̂ = (AᵀPA)⁻¹AᵀPl. 
-              Baarda Data Snooping (w-testi) ve %95 Güven Aralıklı 2D/3D Hata Elipsoitleri.
+              {isFree
+                ? 'Ağdaki ölçü kaba hatalarını (outliers) ve iç tutarlılığı test etmek için 1 referans noktası sabit kabul edilerek yapılan 3D Gauss-Markov dengelemesi.'
+                : 'Tüm TUSAGA-Aktif / CORS sabit noktaları dayanak alınarak yapılan nihai 3D Gauss-Markov dengelemesi.'}
             </p>
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Mode Selector */}
-            <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-300 text-xs font-bold">
-              <button
-                onClick={() => handleModeChange('constrained')}
-                className={`px-3 py-1.5 rounded-md transition cursor-pointer ${
-                  currentMode === 'constrained'
-                    ? 'bg-sky-600 text-white shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Dayalı Dengeleme (CORS Sabit)
-              </button>
-              <button
-                onClick={() => handleModeChange('unconstrained')}
-                className={`px-3 py-1.5 rounded-md transition cursor-pointer ${
-                  currentMode === 'unconstrained'
-                    ? 'bg-sky-600 text-white shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Serbest Dengeleme (İç Tutarlılık)
-              </button>
-            </div>
-
             {onRunFullWorkflow && (
               <button
                 onClick={onRunFullWorkflow}
                 disabled={isLoading}
-                className="px-4 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-sm transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
-                title="Topcon & Trimble Standartlarında Tam Otomatik 10 Adımlı Akış (Epok Öteleme + Dengeleme + TUTGA Hız Kestirimi + 2005.00 Arşiv)"
+                className="px-3.5 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-sm transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                title="Topcon & Trimble Standartlarında Tam Otomatik İş Akışı"
               >
                 <Zap className="w-3.5 h-3.5 text-amber-300 fill-amber-300" />
-                <span>Tek Tıkla Tam Otomatik İş Akışı (Adım 1-10)</span>
+                <span>Tek Tıkla İş Akışı (Adım 1-10)</span>
               </button>
             )}
 
             <button
-              onClick={() => onRunAdjustment(currentMode)}
+              onClick={() => onRunAdjustment(mode)}
               disabled={isLoading}
-              className="px-4 py-2 text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white rounded-lg shadow-sm transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+              className={`px-4 py-2 text-xs font-bold rounded-lg shadow-sm transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50 ${
+                isFree
+                  ? 'bg-purple-700 hover:bg-purple-800 text-white'
+                  : 'bg-slate-900 hover:bg-slate-800 text-white'
+              }`}
             >
               <Play className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Dengelemeyi Hesapla (F8)</span>
+              <span>{isFree ? 'Serbest Dengelemeyi Hesapla' : 'Dayalı Dengelemeyi Hesapla'}</span>
             </button>
           </div>
         </div>

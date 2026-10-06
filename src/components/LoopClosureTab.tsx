@@ -46,11 +46,8 @@ export const LoopClosureTab: React.FC<Props> = ({
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
-              <span className="bg-sky-100 text-sky-800 text-xs font-semibold px-2 py-0.5 rounded">
-                MODÜL 4
-              </span>
               <h2 className="text-base font-bold text-slate-900">
-                Topoloji ve Döngü Kapanış Analizörü (Loop Closure - Ctrl+L)
+                Topoloji ve Döngü Kapanış Analizörü (Loop Closure)
               </h2>
             </div>
             <p className="text-xs text-slate-500 mt-1">

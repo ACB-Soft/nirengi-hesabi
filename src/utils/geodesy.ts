@@ -37,6 +37,102 @@ export const GRS80 = {
 };
 
 /**
+ * Converts date string or decimal epoch into GPS Week and Day of Week (e.g. "2318-6")
+ */
+export function getGpsWeekDay(dateStr?: string, epochDecimal?: number): string {
+  if (!dateStr && !epochDecimal) return '-';
+
+  let timeMs = 0;
+  if (dateStr) {
+    const cleaned = dateStr.replace(' GPS', '').trim();
+    const d = new Date(cleaned);
+    if (!isNaN(d.getTime())) {
+      timeMs = d.getTime();
+    }
+  }
+
+  if (timeMs === 0 && epochDecimal && epochDecimal > 1980) {
+    const year = Math.floor(epochDecimal);
+    const fraction = epochDecimal - year;
+    const isLeap = (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0);
+    const totalDaysYear = isLeap ? 366 : 365;
+    const dayOfYear = Math.floor(fraction * totalDaysYear) + 1;
+    
+    const d = new Date(Date.UTC(year, 0, dayOfYear));
+    timeMs = d.getTime();
+  }
+
+  if (timeMs === 0) return '-';
+
+  // GPS Epoch: January 6, 1980 00:00:00 UTC
+  const gpsEpochMs = Date.UTC(1980, 0, 6, 0, 0, 0);
+  const diffMs = timeMs - gpsEpochMs;
+  if (diffMs < 0) return '-';
+
+  const totalDays = Math.floor(diffMs / (86400 * 1000));
+  const week = Math.floor(totalDays / 7);
+  const dayOfWeek = totalDays % 7;
+
+  return `${week}-${dayOfWeek}`;
+}
+
+/**
+ * Returns short clean antenna name e.g. "CHCI83" or "TRM59800.00"
+ */
+export function getShortAntennaName(modelStr?: string): string {
+  if (!modelStr) return '-';
+  const clean = modelStr.trim();
+  if (!clean || clean === 'UNKNOWN' || clean === 'NONE') return '-';
+
+  // Extract from parenthesized format e.g. "... (CHCI83)"
+  const matchParen = clean.match(/\(([^)]+)\)$/);
+  if (matchParen && matchParen[1]) return matchParen[1].trim();
+
+  // Extract first token e.g. "CHCI83" or "TRM59800.00"
+  const firstToken = clean.split(/\s+/)[0];
+  return firstToken || clean;
+}
+
+/**
+ * Parses numeric timezone offset hours from strings like "GMT+03:00", "UTC+3", "GMT-05:00"
+ */
+export function getTimeZoneOffsetHours(timeZoneStr: string = 'GMT+03:00'): number {
+  if (!timeZoneStr) return 3;
+  const match = timeZoneStr.match(/(?:GMT|UTC)\s*([+-]?\d{1,2})(?::(\d{2}))?/i) ||
+                timeZoneStr.match(/([+-]\d{1,2})(?::(\d{2}))?/);
+  if (match) {
+    const hours = parseInt(match[1], 10) || 0;
+    const mins = parseInt(match[2] || '0', 10) || 0;
+    const sign = hours < 0 ? -1 : 1;
+    return hours + (sign * mins) / 60;
+  }
+  return 3;
+}
+
+/**
+ * Adjusts a GPS/UTC date string to local time based on project timeZone setting
+ */
+export function adjustDateStringToTimeZone(dateStr: string | undefined, timeZoneStr: string = 'GMT+03:00'): string {
+  if (!dateStr || dateStr === '-') return '-';
+
+  const cleaned = dateStr.replace(' GPS', '').replace(' (Dosya uzantısından)', '').trim();
+  const d = new Date(cleaned);
+  if (isNaN(d.getTime())) return dateStr;
+
+  const offsetHours = getTimeZoneOffsetHours(timeZoneStr);
+  const adjustedDate = new Date(d.getTime() + offsetHours * 3600 * 1000);
+
+  const yyyy = adjustedDate.getUTCFullYear();
+  const mm = String(adjustedDate.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(adjustedDate.getUTCDate()).padStart(2, '0');
+  const hh = String(adjustedDate.getUTCHours()).padStart(2, '0');
+  const mi = String(adjustedDate.getUTCMinutes()).padStart(2, '0');
+  const ss = String(adjustedDate.getUTCSeconds()).padStart(2, '0');
+
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
+}
+
+/**
  * Degrees to Radians
  */
 export function degToRad(deg: number): number {
@@ -282,9 +378,9 @@ export function enuToEcef(de: number, dn: number, du: number, latDeg: number, lo
 // ============================================================================
 
 /**
- * Computes ARP vertical antenna height:
- * - Vertical (Pilye): h_vertical = measured_h - offset
- * - Slant (Sehpa/Jalon): h_vertical = sqrt(R_slant^2 - R_ant^2) - offset
+ * Computes ARP / Phase Center vertical antenna height:
+ * - Vertical (Pilye): h_arp = measured_h + offset
+ * - Slant (Sehpa/Jalon): h_arp = sqrt(R_slant^2 - R_ant^2) + offset
  */
 export function calculateCorrectedAntennaHeight(
   type: 'vertical' | 'slant',
@@ -292,15 +388,14 @@ export function calculateCorrectedAntennaHeight(
   radius: number = 0.09,
   offset: number = 0.0
 ): number {
-  if (type === 'vertical') {
-    return Math.max(0, measuredH - offset);
+  let hVert = measuredH;
+  if (type === 'slant') {
+    if (measuredH * measuredH >= radius * radius) {
+      hVert = Math.sqrt(measuredH * measuredH - radius * radius);
+    }
   }
-  // Slant calculation
-  if (measuredH * measuredH < radius * radius) {
-    return Math.max(0, measuredH - offset);
-  }
-  const vert = Math.sqrt(measuredH * measuredH - radius * radius) - offset;
-  return Math.max(0, vert);
+  // Add vertical offset (L1 PCO Up / ARP phase offset)
+  return Math.max(0, Number((hVert + offset).toFixed(4)));
 }
 
 /**
@@ -539,7 +634,7 @@ export function parseRinexHeader(rinexText: string, fileName?: string): Partial<
   const pcoL2 = matchedCal ? matchedCal.pcoL2 : { n: 0.9, e: -0.2, u: 82.1 };
   const pcvZenith = matchedCal ? matchedCal.pcvZenith : [0, 0.6, 1.4, 2.5, 4.1];
   const radius = matchedCal ? matchedCal.radius : 0.095;
-  const verticalOffset = matchedCal ? matchedCal.verticalOffset : 0.0;
+  const verticalOffset = matchedCal ? (matchedCal.verticalOffset || matchedCal.pcoL1.u / 1000.0) : (pcoL1.u / 1000.0);
   const finalModel = matchedCal ? matchedCal.model : (antennaModel || 'TRM59800.00     NONE');
   const correctedHeight = calculateCorrectedAntennaHeight('vertical', deltaH, radius, verticalOffset);
 
@@ -2178,14 +2273,19 @@ export function exportAdjustmentToExcel(
 // ============================================================================
 
 export const DEFAULT_CONFIG: JobConfig = {
-  projectName: 'İç Anadolu GNSS Nirengi Ağı Dengelemesi',
-  surveyor: 'Başmühendis / GNSS Ağ Sorumlusu',
-  institution: 'T.C. Harita Genel Müdürlüğü & DSİ Uyumlu Proje',
+  projectName: 'GNSS Nirengi Ağı Dengeleme Projesi',
+  surveyor: 'Harita Mühendisi',
+  checker: 'Kontrol Mühendisi',
+  institution: 'T.C. Harita Genel Müdürlüğü',
   timeZone: 'GMT+03:00',
   crsSystem: 'TUREF-TM30',
-  dom: 33, // 3° Belt Central Meridian for Ankara region
+  dom: 30, // Central Meridian for TM30 is 30°
   angleUnit: 'Gon',
+  lengthUnit: 'Metre',
+  satelliteSystems: 'GPS+GLONASS',
   elevationMask: 10,
+  horizontalTolerance: 0.03, // 0.03 m
+  verticalTolerance: 0.05, // 0.05 m
   ellipsoid: 'GRS80',
   refEpoch: 2005.0,
   surveyEpoch: 2024.45,
@@ -2241,91 +2341,108 @@ export function generateBaselinesFromStations(stations: Record<string, Station>)
     return { dx: dEcefX, dy: dEcefY, dz: dEcefZ };
   }
 
-  for (let i = 0; i < stationList.length; i++) {
-    const s1 = stationList[i];
+  // Explicit Pair Generation Strategy for TUSAGA Base & Rover Topology:
+  // 1. Radial Baselines (Radyal Bazlar - Ana Ölçüler): Connect every Base (CORS/Fixed) station to every Rover (Unknown) station
+  // 2. Control Baselines (Kontrol Bazları): Connect every Base station to every other Base station
+  // 3. Rover Connections: Connect Rovers to each other to complete 3D closed loops
+  const pairsToCreate: Array<[Station, Station]> = [];
 
-    // Calculate distance to all other stations
-    const distances: Array<{ st: Station; dist: number }> = [];
-    for (let j = 0; j < stationList.length; j++) {
-      if (i === j) continue;
-      const s2 = stationList[j];
-      const dx = s2.x - s1.x;
-      const dy = s2.y - s1.y;
-      const dz = s2.z - s1.z;
-      const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-      distances.push({ st: s2, dist });
+  const baseStations = stationList.filter((s) => s.type === 'CORS' || (s.isFixed.x && s.isFixed.y && s.isFixed.z));
+  const roverStations = stationList.filter((s) => !baseStations.includes(s));
+
+  // 1. Radial Baselines: Base -> Rover
+  for (const base of baseStations) {
+    for (const rover of roverStations) {
+      pairsToCreate.push([base, rover]);
     }
+  }
 
-    // Sort by proximity and connect up to 3 closest neighbors
-    distances.sort((a, b) => a.dist - b.dist);
-    const neighborsToConnect = distances.slice(0, Math.min(3, distances.length));
-
-    for (const neighbor of neighborsToConnect) {
-      const s2 = neighbor.st;
-      const pairKey = [s1.id, s2.id].sort().join('___');
-      if (addedPairs.has(pairKey)) continue;
-      addedPairs.add(pairKey);
-
-      // Raw Ground differences
-      const trueGroundDX = s2.x - s1.x;
-      const trueGroundDY = s2.y - s1.y;
-      const trueGroundDZ = s2.z - s1.z;
-      const length = neighbor.dist;
-
-      // Antenna offsets
-      const ant1 = getAntennaEcefOffset(s1);
-      const ant2 = getAntennaEcefOffset(s2);
-
-      // Phase center vector = Ground Vector + (Ant2 - Ant1)
-      const apcDX = trueGroundDX + (ant2.dx - ant1.dx);
-      const apcDY = trueGroundDY + (ant2.dy - ant1.dy);
-      const apcDZ = trueGroundDZ + (ant2.dz - ant1.dz);
-
-      // Pseudo-random carrier phase double difference noise (approx 1.5mm - 3.5mm)
-      const hashVal = (bIndex * 13 + s1.id.charCodeAt(0) + s2.id.charCodeAt(0)) % 100;
-      const noiseX = ((hashVal % 11) - 5) * 0.0006;
-      const noiseY = (((hashVal * 3) % 11) - 5) * 0.0006;
-      const noiseZ = (((hashVal * 7) % 11) - 5) * 0.0006;
-
-      // Final double difference observed baseline
-      const dX = apcDX - (ant2.dx - ant1.dx) + noiseX;
-      const dY = apcDY - (ant2.dy - ant1.dy) + noiseY;
-      const dZ = apcDZ - (ant2.dz - ant1.dz) + noiseZ;
-
-      // Realistic covariance: (2.5 mm + 0.5 ppm * S)^2 in m^2
-      const sigmaM = (2.5 + 0.5 * (length / 1000.0)) * 1e-3;
-      const varM2 = sigmaM * sigmaM;
-
-      const qxx = varM2 * 0.95;
-      const qyy = varM2 * 1.05;
-      const qzz = varM2 * 0.85;
-      const qxy = varM2 * 0.22;
-      const qyz = varM2 * 0.15;
-      const qzx = varM2 * 0.18;
-
-      baselines.push({
-        id: `BASE_${bIndex < 10 ? '0' + bIndex : bIndex}`,
-        fromId: s1.id,
-        toId: s2.id,
-        dX,
-        dY,
-        dZ,
-        length,
-        qxx,
-        qyy,
-        qzz,
-        qxy,
-        qyz,
-        qzx,
-        solutionType: 'FIX',
-        ratio: 28.5 + (bIndex % 8) * 1.8,
-        rms: 0.0025,
-        durationMin: Math.max(30, Math.min(180, Math.round(length / 200))),
-        satellites: 24,
-        pdop: 1.2,
-      });
-      bIndex++;
+  // 2. Control Baselines: Base -> Base
+  for (let i = 0; i < baseStations.length; i++) {
+    for (let j = i + 1; j < baseStations.length; j++) {
+      pairsToCreate.push([baseStations[i], baseStations[j]]);
     }
+  }
+
+  // 3. Rover-to-Rover Baselines (if multiple rovers)
+  for (let i = 0; i < roverStations.length; i++) {
+    for (let j = i + 1; j < roverStations.length; j++) {
+      pairsToCreate.push([roverStations[i], roverStations[j]]);
+    }
+  }
+
+  // Fallback: If no base/rover distinction found, connect proximity neighbors (up to 3)
+  if (pairsToCreate.length === 0) {
+    for (let i = 0; i < stationList.length; i++) {
+      for (let j = i + 1; j < stationList.length; j++) {
+        pairsToCreate.push([stationList[i], stationList[j]]);
+      }
+    }
+  }
+
+  for (const [s1, s2] of pairsToCreate) {
+    const pairKey = [s1.id, s2.id].sort().join('___');
+    if (addedPairs.has(pairKey)) continue;
+    addedPairs.add(pairKey);
+
+    const trueGroundDX = s2.x - s1.x;
+    const trueGroundDY = s2.y - s1.y;
+    const trueGroundDZ = s2.z - s1.z;
+    const length = Math.sqrt(trueGroundDX * trueGroundDX + trueGroundDY * trueGroundDY + trueGroundDZ * trueGroundDZ);
+
+    // Antenna offsets
+    const ant1 = getAntennaEcefOffset(s1);
+    const ant2 = getAntennaEcefOffset(s2);
+
+    // Phase center vector = Ground Vector + (Ant2 - Ant1)
+    const apcDX = trueGroundDX + (ant2.dx - ant1.dx);
+    const apcDY = trueGroundDY + (ant2.dy - ant1.dy);
+    const apcDZ = trueGroundDZ + (ant2.dz - ant1.dz);
+
+    // Pseudo-random carrier phase double difference noise (approx 1.5mm - 3.5mm)
+    const hashVal = (bIndex * 13 + s1.id.charCodeAt(0) + s2.id.charCodeAt(0)) % 100;
+    const noiseX = ((hashVal % 11) - 5) * 0.0006;
+    const noiseY = (((hashVal * 3) % 11) - 5) * 0.0006;
+    const noiseZ = (((hashVal * 7) % 11) - 5) * 0.0006;
+
+    // Final double difference observed baseline
+    const dX = apcDX - (ant2.dx - ant1.dx) + noiseX;
+    const dY = apcDY - (ant2.dy - ant1.dy) + noiseY;
+    const dZ = apcDZ - (ant2.dz - ant1.dz) + noiseZ;
+
+    // Realistic covariance: (2.5 mm + 0.5 ppm * S)^2 in m^2
+    const sigmaM = (2.5 + 0.5 * (length / 1000.0)) * 1e-3;
+    const varM2 = sigmaM * sigmaM;
+
+    const qxx = varM2 * 0.95;
+    const qyy = varM2 * 1.05;
+    const qzz = varM2 * 0.85;
+    const qxy = varM2 * 0.22;
+    const qyz = varM2 * 0.15;
+    const qzx = varM2 * 0.18;
+
+    baselines.push({
+      id: `BASE_${bIndex < 10 ? '0' + bIndex : bIndex}`,
+      fromId: s1.id,
+      toId: s2.id,
+      dX,
+      dY,
+      dZ,
+      length,
+      qxx,
+      qyy,
+      qzz,
+      qxy,
+      qyz,
+      qzx,
+      solutionType: 'FIX',
+      ratio: 28.5 + (bIndex % 8) * 1.8,
+      rms: 0.0025,
+      durationMin: Math.max(30, Math.min(180, Math.round(length / 200))),
+      satellites: 24,
+      pdop: 1.2,
+    });
+    bIndex++;
   }
 
   return baselines;

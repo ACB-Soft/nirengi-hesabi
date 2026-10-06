@@ -274,9 +274,6 @@ export const EpochGeoCalcTab: React.FC<Props> = ({
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
-              <span className="bg-sky-100 text-sky-800 text-xs font-semibold px-2 py-0.5 rounded">
-                MODÜL 6
-              </span>
               <h2 className="text-base font-bold text-slate-900">
                 Topcon Tools & GeoCalculator Entegre Epok & Hız Kestirim Motoru
               </h2>

@@ -24,14 +24,13 @@ import {
 
 import { JobConfigTab } from './components/JobConfigTab';
 import { StationsAntennaTab } from './components/StationsAntennaTab';
-import { OccupationViewTab } from './components/OccupationViewTab';
 import { BaselinesTab } from './components/BaselinesTab';
 import { LoopClosureTab } from './components/LoopClosureTab';
 import { AdjustmentTab } from './components/AdjustmentTab';
+import { FixedCoordinatesTab } from './components/FixedCoordinatesTab';
 import { EpochGeoCalcTab } from './components/EpochGeoCalcTab';
 import { MapTab } from './components/MapTab';
 import { ReportExportTab } from './components/ReportExportTab';
-import { TechnicalDocsTab } from './components/TechnicalDocsTab';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { OfflineIndicator } from './components/OfflineIndicator';
 
@@ -42,6 +41,8 @@ import {
   Share2,
   RotateCcw,
   BarChart3,
+  Sliders,
+  ShieldCheck,
   TrendingUp,
   MapPin,
   FileText,
@@ -55,17 +56,17 @@ import {
 type TabKey =
   | 'settings'
   | 'stations'
-  | 'occupation'
   | 'baselines'
   | 'loops'
-  | 'adjustment'
+  | 'free_adjustment'
+  | 'fixed_coords'
+  | 'constrained_adjustment'
   | 'epoch'
   | 'map'
-  | 'report'
-  | 'docs';
+  | 'report';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<TabKey>('stations');
+  const [activeTab, setActiveTab] = useState<TabKey>('settings');
 
   // Job Configurations
   const [config, setConfig] = useState<JobConfig>(DEFAULT_CONFIG);
@@ -77,6 +78,8 @@ export default function App() {
 
   // Analysis Results
   const [loopClosures, setLoopClosures] = useState<LoopClosure[]>([]);
+  const [unconstrainedResult, setUnconstrainedResult] = useState<AdjustmentResult | null>(null);
+  const [constrainedResult, setConstrainedResult] = useState<AdjustmentResult | null>(null);
   const [adjustmentResult, setAdjustmentResult] = useState<AdjustmentResult | null>(null);
 
   const [isLoading, setIsLoading] = useState(false);
@@ -126,6 +129,11 @@ export default function App() {
       setIsLoading(true);
       setTimeout(() => {
         const res = perform3DNetworkAdjustment(stations, baselines, mode, config);
+        if (mode === 'unconstrained') {
+          setUnconstrainedResult(res);
+        } else {
+          setConstrainedResult(res);
+        }
         setAdjustmentResult(res);
         setIsLoading(false);
 
@@ -158,7 +166,13 @@ export default function App() {
     );
     setLoopClosures(loops);
 
-    const res = perform3DNetworkAdjustment(stations, updated, adjustmentResult?.mode || 'constrained', config);
+    const activeMode = activeTab === 'free_adjustment' ? 'unconstrained' : 'constrained';
+    const res = perform3DNetworkAdjustment(stations, updated, activeMode, config);
+    if (activeMode === 'unconstrained') {
+      setUnconstrainedResult(res);
+    } else {
+      setConstrainedResult(res);
+    }
     setAdjustmentResult(res);
     showToast(`${outlierIds.length} adet kaba hatalı baz elendi ve ağ yeniden dengelendi.`);
   };
@@ -173,7 +187,7 @@ export default function App() {
       } else if (e.key === 'F8') {
         e.preventDefault();
         handleRunAdjustment('constrained');
-        setActiveTab('adjustment');
+        setActiveTab('constrained_adjustment');
       }
     };
 
@@ -238,6 +252,8 @@ export default function App() {
       setStations(res.finalStations);
       setBaselines(res.baselines);
       setLoopClosures(res.loopClosures);
+      setUnconstrainedResult(res.unconstrainedResult);
+      setConstrainedResult(res.constrainedResult);
       setAdjustmentResult(res.constrainedResult || res.unconstrainedResult);
       setIsLoading(false);
       showToast('Topcon & Trimble 10 adımlı tam otomatik dengeleme ve epok aktarımı tamamlandı!');
@@ -322,30 +338,6 @@ export default function App() {
 
             {/* Header Right Actions */}
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => {
-                  handleRecalculateLoops();
-                  setActiveTab('loops');
-                }}
-                className="px-2.5 py-1.5 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg border border-slate-700 transition cursor-pointer hidden md:flex items-center gap-1.5"
-                title="Döngü Kapanışlarını Yeniden Hesapla (Ctrl+L)"
-              >
-                <Zap className="w-3.5 h-3.5 text-amber-400" />
-                <span>Döngü (Ctrl+L)</span>
-              </button>
-
-              <button
-                onClick={() => {
-                  handleRunAdjustment('constrained');
-                  setActiveTab('adjustment');
-                }}
-                className="px-3 py-1.5 text-xs font-bold bg-sky-600 hover:bg-sky-500 text-white rounded-lg shadow-sm transition cursor-pointer flex items-center gap-1.5"
-                title="3D Ağ Dengelemesini Çalıştır (F8)"
-              >
-                <Play className="w-3.5 h-3.5 text-white" />
-                <span>Dengele (F8)</span>
-              </button>
-
               <PWAInstallButton />
             </div>
           </div>
@@ -365,7 +357,7 @@ export default function App() {
             }`}
           >
             <Settings className="w-4 h-4 text-slate-500" />
-            <span>1. Proje Ayarları</span>
+            <span>Proje Ayarları</span>
           </button>
 
           <button
@@ -377,27 +369,10 @@ export default function App() {
             }`}
           >
             <Radio className="w-4 h-4 text-sky-600" />
-            <span>2. Noktalar & ANTEX</span>
+            <span>Rinex Veriler</span>
             <span className="bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full text-[10px] font-bold">
               {stationCount}
             </span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('occupation')}
-            className={`px-3.5 py-2.5 text-xs sm:text-sm font-semibold border-b-2 flex items-center gap-2 whitespace-nowrap transition cursor-pointer ${
-              activeTab === 'occupation'
-                ? 'border-sky-600 text-sky-600'
-                : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <Activity className="w-4 h-4 text-emerald-600" />
-            <span>3. Oturum & Uydu (Occupation)</span>
-            {stationCount > 0 && (
-              <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full text-[10px] font-bold">
-                {stationCount}
-              </span>
-            )}
           </button>
 
           <button
@@ -409,7 +384,7 @@ export default function App() {
             }`}
           >
             <Share2 className="w-4 h-4 text-emerald-600" />
-            <span>4. Bazlar & RTKLIB</span>
+            <span>Bazlar & RTKLIB</span>
             <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full text-[10px] font-bold">
               {activeBaselineCount}
             </span>
@@ -424,26 +399,57 @@ export default function App() {
             }`}
           >
             <RotateCcw className="w-4 h-4 text-amber-600" />
-            <span>5. Döngü Kapanış</span>
+            <span>Döngü Kapanış</span>
             <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full text-[10px] font-bold">
               {loopClosures.length}
             </span>
           </button>
 
           <button
-            onClick={() => setActiveTab('adjustment')}
+            onClick={() => setActiveTab('free_adjustment')}
             className={`px-3.5 py-2.5 text-xs sm:text-sm font-semibold border-b-2 flex items-center gap-2 whitespace-nowrap transition cursor-pointer ${
-              activeTab === 'adjustment'
+              activeTab === 'free_adjustment'
+                ? 'border-purple-600 text-purple-600'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <Sliders className="w-4 h-4 text-purple-600" />
+            <span>Serbest Dengeleme</span>
+            {unconstrainedResult && (
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  unconstrainedResult.chiSquareTest.passed ? 'bg-emerald-500' : 'bg-rose-500'
+                }`}
+              />
+            )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('fixed_coords')}
+            className={`px-3.5 py-2.5 text-xs sm:text-sm font-semibold border-b-2 flex items-center gap-2 whitespace-nowrap transition cursor-pointer ${
+              activeTab === 'fixed_coords'
+                ? 'border-purple-600 text-purple-600'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <ShieldCheck className="w-4 h-4 text-purple-600" />
+            <span>Sabit Koordinatlar</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('constrained_adjustment')}
+            className={`px-3.5 py-2.5 text-xs sm:text-sm font-semibold border-b-2 flex items-center gap-2 whitespace-nowrap transition cursor-pointer ${
+              activeTab === 'constrained_adjustment'
                 ? 'border-sky-600 text-sky-600'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
             <BarChart3 className="w-4 h-4 text-indigo-600" />
-            <span>6. 3D Dengeleme</span>
-            {adjustmentResult && (
+            <span>Dayalı Dengeleme</span>
+            {constrainedResult && (
               <span
                 className={`w-2 h-2 rounded-full ${
-                  adjustmentResult.chiSquareTest.passed ? 'bg-emerald-500' : 'bg-rose-500'
+                  constrainedResult.chiSquareTest.passed ? 'bg-emerald-500' : 'bg-rose-500'
                 }`}
               />
             )}
@@ -458,7 +464,7 @@ export default function App() {
             }`}
           >
             <TrendingUp className="w-4 h-4 text-teal-600" />
-            <span>7. Epok & GeoCalc</span>
+            <span>Epok & GeoCalc</span>
           </button>
 
           <button
@@ -470,7 +476,7 @@ export default function App() {
             }`}
           >
             <MapPin className="w-4 h-4 text-rose-600" />
-            <span>8. Ağ Haritası</span>
+            <span>Ağ Haritası</span>
           </button>
 
           <button
@@ -482,19 +488,7 @@ export default function App() {
             }`}
           >
             <FileText className="w-4 h-4 text-orange-600" />
-            <span>9. Rapor & Çıktı</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('docs')}
-            className={`px-3.5 py-2.5 text-xs sm:text-sm font-semibold border-b-2 flex items-center gap-2 whitespace-nowrap transition cursor-pointer ${
-              activeTab === 'docs'
-                ? 'border-sky-600 text-sky-600'
-                : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <BookOpen className="w-4 h-4 text-slate-600" />
-            <span>Dokümantasyon</span>
+            <span>Rapor & Çıktı</span>
           </button>
         </div>
 
@@ -511,23 +505,12 @@ export default function App() {
           <StationsAntennaTab
             stations={stations}
             dom={config.dom}
+            timeZone={config.timeZone}
             onUpdateStation={handleUpdateStation}
             onAddStation={handleAddStation}
             onDeleteStation={handleDeleteStation}
             onClearAllStations={handleClearAllStations}
             onDetectedSurveyEpoch={handleDetectedSurveyEpoch}
-            onViewOccupation={(stId) => {
-              setSelectedOccupationStationId(stId);
-              setActiveTab('occupation');
-            }}
-          />
-        )}
-
-        {activeTab === 'occupation' && (
-          <OccupationViewTab
-            stations={stations}
-            selectedStationId={selectedOccupationStationId}
-            onSelectStation={setSelectedOccupationStationId}
           />
         )}
 
@@ -552,9 +535,34 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'adjustment' && (
+        {activeTab === 'free_adjustment' && (
           <AdjustmentTab
-            adjustmentResult={adjustmentResult}
+            mode="unconstrained"
+            adjustmentResult={unconstrainedResult || (adjustmentResult?.mode === 'unconstrained' ? adjustmentResult : null)}
+            config={config}
+            onRunAdjustment={handleRunAdjustment}
+            onExcludeOutliersAndReAdjust={handleExcludeOutliersAndReAdjust}
+            onRunFullWorkflow={handleRunFullTopconWorkflow}
+            isLoading={isLoading}
+          />
+        )}
+
+        {activeTab === 'fixed_coords' && (
+          <FixedCoordinatesTab
+            stations={stations}
+            config={config}
+            onUpdateStation={handleUpdateStation}
+            onNavigateToConstrainedAdjustment={() => {
+              handleRunAdjustment('constrained');
+              setActiveTab('constrained_adjustment');
+            }}
+          />
+        )}
+
+        {activeTab === 'constrained_adjustment' && (
+          <AdjustmentTab
+            mode="constrained"
+            adjustmentResult={constrainedResult || (adjustmentResult?.mode === 'constrained' ? adjustmentResult : null)}
             config={config}
             onRunAdjustment={handleRunAdjustment}
             onExcludeOutliersAndReAdjust={handleExcludeOutliersAndReAdjust}
@@ -588,8 +596,6 @@ export default function App() {
             stations={stations}
           />
         )}
-
-        {activeTab === 'docs' && <TechnicalDocsTab />}
       </main>
 
       {/* Toast Notification Popup */}

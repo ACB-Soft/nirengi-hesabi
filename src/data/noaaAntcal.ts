@@ -22,6 +22,34 @@ export interface NoaaAntennaCalibration {
 
 export const NOAA_ANTCAL_CATALOG: NoaaAntennaCalibration[] = [
   // =========================================================================
+  // CHCNAV / CHC
+  // =========================================================================
+  {
+    model: 'CHCI83          NONE',
+    displayName: 'CHCNAV i83 Visual IMU GNSS Smart Antenna (CHCI83)',
+    manufacturer: 'CHCNAV',
+    radome: 'NONE',
+    category: 'Rover / SmartAntenna',
+    radius: 0.080,
+    verticalOffset: 0.0773, // 77.3 mm L1 PCO Up
+    pcoL1: { n: 0.00, e: 0.00, u: 77.30 },
+    pcoL2: { n: 0.00, e: 0.00, u: 75.80 },
+    pcvZenith: [0.0, 0.5, 1.2, 2.2, 3.8, 5.5, 7.2],
+  },
+  {
+    model: 'CHCI90          NONE',
+    displayName: 'CHCNAV i90 / i73 GNSS Smart Antenna (CHCI90)',
+    manufacturer: 'CHCNAV',
+    radome: 'NONE',
+    category: 'Rover / SmartAntenna',
+    radius: 0.080,
+    verticalOffset: 0.0750,
+    pcoL1: { n: 0.00, e: 0.00, u: 75.00 },
+    pcoL2: { n: 0.00, e: 0.00, u: 73.50 },
+    pcvZenith: [0.0, 0.5, 1.2, 2.2, 3.8, 5.5, 7.2],
+  },
+
+  // =========================================================================
   // TRIMBLE
   // =========================================================================
   {

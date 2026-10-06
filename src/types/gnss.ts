@@ -16,20 +16,25 @@ export type AdjustmentMode = 'unconstrained' | 'constrained';
 
 export interface JobConfig {
   projectName: string;
-  surveyor: string;
-  institution: string;
-  timeZone: string;
+  surveyor: string; // Hesaplayan
+  checker: string; // Kontrol Eden
+  institution?: string;
+  timeZone: string; // User editable (e.g. GMT+03:00)
   crsSystem: CRSSystem;
   dom: number; // Central Meridian (DOM): 27, 30, 33, 36, 39, 42
   angleUnit: AngleUnit;
-  elevationMask: number; // Degrees, e.g. 10
+  lengthUnit: 'Metre';
+  satelliteSystems: 'GPS Only' | 'GPS+GLONASS' | 'Multi-GNSS';
+  elevationMask: number; // Degrees, default 10
+  horizontalTolerance: number; // meters, default 0.03m
+  verticalTolerance: number; // meters, default 0.05m
   ellipsoid: 'GRS80';
   refEpoch: number; // 2005.00
   surveyEpoch: number; // e.g. 2024.45
   loopToleranceBaseMm: number; // e.g. 10 mm
   loopTolerancePpm: number; // e.g. 1.0 ppm
-  baardaAlpha: number; // e.g. 0.001 (w_crit = 3.29)
-  wCrit: number; // 3.29 for alpha = 0.001
+  baardaAlpha: number; // e.g. 0.001
+  wCrit: number; // 3.29
 }
 
 export interface AntennaData {
