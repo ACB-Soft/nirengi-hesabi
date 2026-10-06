@@ -26,6 +26,7 @@ interface Props {
   config: JobConfig;
   onRunAdjustment: (mode: 'unconstrained' | 'constrained') => void;
   onExcludeOutliersAndReAdjust: (outlierIds: string[]) => void;
+  onRunFullWorkflow?: () => void;
   isLoading: boolean;
 }
 
@@ -34,6 +35,7 @@ export const AdjustmentTab: React.FC<Props> = ({
   config,
   onRunAdjustment,
   onExcludeOutliersAndReAdjust,
+  onRunFullWorkflow,
   isLoading,
 }) => {
   const [selectedSubTab, setSelectedSubTab] = useState<'coords' | 'residuals' | 'ellipses'>('coords');
@@ -88,6 +90,18 @@ export const AdjustmentTab: React.FC<Props> = ({
                 Serbest Dengeleme (İç Tutarlılık)
               </button>
             </div>
+
+            {onRunFullWorkflow && (
+              <button
+                onClick={onRunFullWorkflow}
+                disabled={isLoading}
+                className="px-4 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-sm transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                title="Topcon & Trimble Standartlarında Tam Otomatik 10 Adımlı Akış (Epok Öteleme + Dengeleme + TUTGA Hız Kestirimi + 2005.00 Arşiv)"
+              >
+                <Zap className="w-3.5 h-3.5 text-amber-300 fill-amber-300" />
+                <span>Tek Tıkla Tam Otomatik İş Akışı (Adım 1-10)</span>
+              </button>
+            )}
 
             <button
               onClick={() => onRunAdjustment(currentMode)}

@@ -19,6 +19,7 @@ import {
   calculateLoopClosures,
   perform3DNetworkAdjustment,
   generateBaselinesFromStations,
+  runFullTopconWorkflow,
 } from './utils/geodesy';
 
 import { JobConfigTab } from './components/JobConfigTab';
@@ -187,7 +188,24 @@ export default function App() {
   };
 
   const handleAddStation = (st: Station) => {
-    setStations((prev) => ({ ...prev, [st.id]: st }));
+    setStations((prev) => {
+      const next = { ...prev, [st.id]: st };
+      // Automatically generate/refresh baselines when 2 or more stations exist
+      if (Object.keys(next).length >= 2) {
+        setTimeout(() => {
+          const generated = generateBaselinesFromStations(next);
+          setBaselines(generated);
+          const loops = calculateLoopClosures(
+            next,
+            generated,
+            config.loopToleranceBaseMm,
+            config.loopTolerancePpm
+          );
+          setLoopClosures(loops);
+        }, 100);
+      }
+      return next;
+    });
   };
 
   const handleDeleteStation = (id: string) => {
@@ -207,6 +225,24 @@ export default function App() {
     setAdjustmentResult(null);
     showToast('Tüm noktalar ve bazlar temizlendi.');
   };
+
+  // End-to-End Automated Topcon / Trimble 10-Step Workflow
+  const handleRunFullTopconWorkflow = useCallback(() => {
+    if (Object.keys(stations).length < 2) {
+      showToast('Tam otomatik dengeleme için ağda en az 2 nokta bulunmalıdır.');
+      return;
+    }
+    setIsLoading(true);
+    setTimeout(() => {
+      const res = runFullTopconWorkflow(stations, baselines, config);
+      setStations(res.finalStations);
+      setBaselines(res.baselines);
+      setLoopClosures(res.loopClosures);
+      setAdjustmentResult(res.constrainedResult || res.unconstrainedResult);
+      setIsLoading(false);
+      showToast('Topcon & Trimble 10 adımlı tam otomatik dengeleme ve epok aktarımı tamamlandı!');
+    }, 600);
+  }, [stations, baselines, config]);
 
   const handleGenerateBaselinesFromPoints = () => {
     if (Object.keys(stations).length < 2) {
@@ -522,6 +558,7 @@ export default function App() {
             config={config}
             onRunAdjustment={handleRunAdjustment}
             onExcludeOutliersAndReAdjust={handleExcludeOutliersAndReAdjust}
+            onRunFullWorkflow={handleRunFullTopconWorkflow}
             isLoading={isLoading}
           />
         )}
