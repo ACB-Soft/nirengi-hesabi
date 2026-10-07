@@ -362,6 +362,80 @@ export const BaselinesTab: React.FC<Props> = ({
           )}
         </div>
       </div>
+
+      {/* RTKLIB Processing Steps Information Card */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 mt-6">
+        <h3 className="text-sm font-bold text-slate-900 border-b border-slate-100 pb-3 mb-4 flex items-center gap-2">
+          <Cpu className="w-4 h-4 text-sky-600" />
+          <span>RTKLIB Çift Fark (Double Difference) Statik Baz Çözüm İşlem Adımları</span>
+        </h3>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
+          <div className="p-3.5 bg-slate-50 rounded-lg border border-slate-200 space-y-2">
+            <div className="flex items-center gap-2 font-bold text-slate-800">
+              <span className="bg-sky-100 text-sky-800 px-2 py-0.5 rounded text-[10px] font-mono">ADIM 1</span>
+              <span>Uydu Yörünge ve Saat Düzeltmeleri</span>
+            </div>
+            <p className="text-slate-600 leading-relaxed text-[11px]">
+              İndirilen yayın (Broadcast <span className="font-mono bg-slate-200/60 px-1 rounded">.n</span>, <span className="font-mono bg-slate-200/60 px-1 rounded">.g</span>) veya hassas (<span className="font-mono bg-slate-200/60 px-1 rounded">.sp3</span>) efemeris verileri kullanılarak, uyduların sinyali yaydığı andaki kesin $X, Y, Z$ konumları ve uydu saat hataları hesaplanır.
+            </p>
+          </div>
+
+          <div className="p-3.5 bg-slate-50 rounded-lg border border-slate-200 space-y-2">
+            <div className="flex items-center gap-2 font-bold text-slate-800">
+              <span className="bg-sky-100 text-sky-800 px-2 py-0.5 rounded text-[10px] font-mono">ADIM 2</span>
+              <span>Gözlem İndirgemeleri ve Fiziksel Düzeltmeler</span>
+            </div>
+            <p className="text-slate-600 leading-relaxed text-[11px]">
+              <strong className="text-slate-800">Anten Faz Merkezi (PCO/PCV):</strong> Yüklenen <span className="font-mono bg-slate-200/60 px-1 rounded">.atx</span> ANTEX verisinden $L_1$ ve $L_2$ frekanslarına ait faz merkezi offset ve varyasyon düzeltmeleri uygulanır.<br/>
+              <strong className="text-slate-800">Alet Yüksekliği (ARP):</strong> Slant (eğik) ölçülen yükseklikler Vertical (dik) yüksekliğe çevrilerek faz merkezinden zemin işaretine indirgeme yapılır.
+            </p>
+          </div>
+
+          <div className="p-3.5 bg-slate-50 rounded-lg border border-slate-200 space-y-2">
+            <div className="flex items-center gap-2 font-bold text-slate-800">
+              <span className="bg-sky-100 text-sky-800 px-2 py-0.5 rounded text-[10px] font-mono">ADIM 3</span>
+              <span>Atmosferik Düzeltmeler</span>
+            </div>
+            <p className="text-slate-600 leading-relaxed text-[11px]">
+              Troposferik gecikme modelleri (Saastamoinen/Hopfield) ve çift frekanslı ($L_1/L_2$) ölçümlerde iyonosfersiz doğrusal bileşim ($L_3$ / Ionosphere-Free) oluşturularak atmosferik kırılmalar elimine edilir.
+            </p>
+          </div>
+
+          <div className="p-3.5 bg-slate-50 rounded-lg border border-slate-200 space-y-2">
+            <div className="flex items-center gap-2 font-bold text-slate-800">
+              <span className="bg-sky-100 text-sky-800 px-2 py-0.5 rounded text-[10px] font-mono">ADIM 4</span>
+              <span>Çift Fark Oluşturma (Double Differencing)</span>
+            </div>
+            <p className="text-slate-600 leading-relaxed text-[11px]">
+              Aynı anda gözlem yapan iki alıcı (Base ve Rover) ve iki uydu arasında fark gözlemleri ($\Delta\nabla\Phi$) kurulur. Bu sayede alıcı ve uydu saat hataları matris denkleminden tamamen elenir.
+            </p>
+          </div>
+
+          <div className="p-3.5 bg-slate-50 rounded-lg border border-slate-200 space-y-2">
+            <div className="flex items-center gap-2 font-bold text-slate-800">
+              <span className="bg-sky-100 text-sky-800 px-2 py-0.5 rounded text-[10px] font-mono">ADIM 5</span>
+              <span>Tam Sayı Belirsizliği Çözümü (Ambiguity Resolution)</span>
+            </div>
+            <p className="text-slate-600 leading-relaxed text-[11px]">
+              Taşıyıcı faz ölçümlerindeki bilinmeyen dalga sayısı (ambiguity) önce reel sayı olarak çözülür (Float Çözüm - $Q=2$). Ardından <strong className="text-slate-800">LAMBDA</strong> veya benzeri algoritmalarla en yakın tamsayıya sabitlenir (Fix Çözüm - $Q=1$).
+            </p>
+          </div>
+
+          <div className="p-3.5 bg-slate-50 rounded-lg border border-slate-200 space-y-2">
+            <div className="flex items-center gap-2 font-bold text-slate-800">
+              <span className="bg-sky-100 text-sky-800 px-2 py-0.5 rounded text-[10px] font-mono">ADIM 6</span>
+              <span>Baz Vektörü ve Kovaryans Matrisi Çıktısı</span>
+            </div>
+            <p className="text-slate-600 leading-relaxed text-[11px]">
+              İşlem sonucunda iki nokta arasındaki relatif vektörler ve bunlara ait istatistiki ağırlık/kovaryans matrisleri üretilir:
+              <span className="block mt-1.5 font-mono text-[10px] text-sky-700 bg-sky-50 p-1.5 rounded border border-sky-100">
+                b = [ΔX, dY, dZ]ᵀ, Q_bb = [Qxx..Qzz]
+              </span>
+            </p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };

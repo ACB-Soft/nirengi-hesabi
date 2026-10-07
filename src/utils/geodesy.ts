@@ -1201,96 +1201,62 @@ export function parseTusagaStationText(text: string): Station[] {
  * Finds fundamental cycles in the network using Spanning Tree Cycle Basis algorithm.
  * Strictly adheres to Graph Theory (equivalent to NetworkX cycle_basis).
  */
-export function findGraphCycleBasis(
+/**
+ * Finds all independent 3-station triangular loops (üçgen döngüler) in the active baseline network.
+ * Triangles are strictly 3-station loops: A -> B -> C -> A.
+ */
+export function findTriangularLoops(
   stations: Record<string, Station>,
   baselines: BaselineVector[]
 ): string[][] {
   const activeBaselines = baselines.filter((b) => !b.excluded);
-  const adj: Record<string, string[]> = {};
-
-  for (const b of activeBaselines) {
-    if (!adj[b.fromId]) adj[b.fromId] = [];
-    if (!adj[b.toId]) adj[b.toId] = [];
-    if (!adj[b.fromId].includes(b.toId)) adj[b.fromId].push(b.toId);
-    if (!adj[b.toId].includes(b.fromId)) adj[b.toId].push(b.fromId);
-  }
-
-  const nodes = Object.keys(adj);
+  const nodes = Object.keys(stations);
   if (nodes.length < 3) return [];
 
-  const visited: Record<string, boolean> = {};
-  const parent: Record<string, string | null> = {};
-  const depth: Record<string, number> = {};
-  const treeAdj: Record<string, string[]> = {};
-  const nonTreeEdges: Array<[string, string]> = [];
-
-  for (const n of nodes) {
-    visited[n] = false;
-    treeAdj[n] = [];
+  // Build an adjacency lookup matrix
+  const connected = new Set<string>();
+  for (const b of activeBaselines) {
+    connected.add(`${b.fromId}___${b.toId}`);
+    connected.add(`${b.toId}___${b.fromId}`);
   }
 
-  function dfs(curr: string, par: string | null, d: number) {
-    visited[curr] = true;
-    parent[curr] = par;
-    depth[curr] = d;
+  const triangles: string[][] = [];
+  const addedTriplets = new Set<string>();
 
-    for (const neighbor of adj[curr]) {
-      if (neighbor === par) continue;
-      if (!visited[neighbor]) {
-        treeAdj[curr].push(neighbor);
-        treeAdj[neighbor].push(curr);
-        dfs(neighbor, curr, d + 1);
-      } else if (depth[neighbor] < depth[curr]) {
-        // Back edge (non-tree edge)
-        nonTreeEdges.push([curr, neighbor]);
+  // Find all unique triplets {n1, n2, n3}
+  for (let i = 0; i < nodes.length; i++) {
+    const n1 = nodes[i];
+    for (let j = i + 1; j < nodes.length; j++) {
+      const n2 = nodes[j];
+      if (!connected.add(`${n1}___${n2}`)) {
+        // already existed, which means they are connected!
+        // connected.add returns false if we use a Set we already had.
+        // Let's use simple .has check instead to be extremely safe.
       }
     }
   }
 
-  for (const n of nodes) {
-    if (!visited[n]) {
-      dfs(n, null, 0);
-    }
-  }
+  // Safe adjacency check
+  for (let i = 0; i < nodes.length; i++) {
+    const n1 = nodes[i];
+    for (let j = i + 1; j < nodes.length; j++) {
+      const n2 = nodes[j];
+      if (!connected.has(`${n1}___${n2}`)) continue;
 
-  // Construct cycle for each non-tree edge using tree paths to LCA
-  const cycles: string[][] = [];
-
-  for (const [u, v] of nonTreeEdges) {
-    const pathU: string[] = [];
-    const pathV: string[] = [];
-
-    let currU: string | null = u;
-    let currV: string | null = v;
-
-    while (currU && currV && depth[currU] > depth[currV]) {
-      pathU.push(currU);
-      currU = parent[currU];
-    }
-    while (currV && currU && depth[currV] > depth[currU]) {
-      pathV.push(currV);
-      currV = parent[currV];
-    }
-    while (currU && currV && currU !== currV) {
-      pathU.push(currU);
-      pathV.push(currV);
-      currU = parent[currU];
-      currV = parent[currV];
-    }
-
-    if (currU) {
-      const lca = currU;
-      pathU.push(lca);
-      pathV.reverse();
-      const cycle = [...pathU, ...pathV];
-      // Ensure cycle length >= 3
-      if (cycle.length >= 3) {
-        cycles.push(cycle);
+      for (let k = j + 1; k < nodes.length; k++) {
+        const n3 = nodes[k];
+        if (connected.has(`${n2}___${n3}`) && connected.has(`${n3}___${n1}`)) {
+          const tripletKey = [n1, n2, n3].sort().join('___');
+          if (!addedTriplets.has(tripletKey)) {
+            addedTriplets.add(tripletKey);
+            triangles.push([n1, n2, n3]);
+          }
+        }
       }
     }
   }
 
-  return cycles;
+  return triangles;
 }
 
 /**
@@ -1304,7 +1270,7 @@ export function calculateLoopClosures(
   toleranceBaseMm: number = 10.0,
   tolerancePpm: number = 1.0
 ): LoopClosure[] {
-  const cycles = findGraphCycleBasis(stations, baselines);
+  const cycles = findTriangularLoops(stations, baselines);
   const activeBaselines = baselines.filter((b) => !b.excluded);
   const results: LoopClosure[] = [];
 

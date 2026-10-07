@@ -6,7 +6,8 @@
  */
 
 import React, { useState } from 'react';
-import { LoopClosure, Station, BaselineVector } from '../types/gnss';
+import { LoopClosure, Station, BaselineVector, AdjustmentResult } from '../types/gnss';
+import { MapTab } from './MapTab';
 import {
   RotateCcw,
   CheckCircle2,
@@ -22,6 +23,7 @@ interface Props {
   loopClosures: LoopClosure[];
   stations: Record<string, Station>;
   baselines: BaselineVector[];
+  adjustmentResult: AdjustmentResult | null;
   onRecalculateLoops: () => void;
 }
 
@@ -29,6 +31,7 @@ export const LoopClosureTab: React.FC<Props> = ({
   loopClosures,
   stations,
   baselines,
+  adjustmentResult,
   onRecalculateLoops,
 }) => {
   const [selectedLoopId, setSelectedLoopId] = useState<string>(loopClosures[0]?.id || '');
@@ -47,11 +50,11 @@ export const LoopClosureTab: React.FC<Props> = ({
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-base font-bold text-slate-900">
-                Topoloji ve Döngü Kapanış Analizörü (Loop Closure)
+                Loop Closure Analizörü
               </h2>
             </div>
             <p className="text-xs text-slate-500 mt-1">
-              Çizge Teorisi (Graph Theory - Cycle Basis) tabanlı kapalı üçgen ve poligon döngüleri.
+              Kapalı 3D bağımsız üçgen döngüleri.
               Vektörel kapanış hatası w = sqrt(wX² + wY² + wZ²) ve 10 mm + 1.0 ppm × S tolerans denetimi.
             </p>
           </div>
@@ -70,8 +73,8 @@ export const LoopClosureTab: React.FC<Props> = ({
         {/* Metric Badges */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 pt-4 border-t border-slate-100 text-xs">
           <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
-            <div className="text-slate-500">Tespit Edilen Bağımsız Döngüler</div>
-            <div className="text-base font-bold font-mono text-slate-900 mt-0.5">{totalLoops} Döngü</div>
+            <div className="text-slate-500">Tespit Edilen Üçgen Döngüleri</div>
+            <div className="text-base font-bold font-mono text-slate-900 mt-0.5">{totalLoops} Üçgen</div>
           </div>
           <div className="p-2.5 bg-emerald-50 rounded-lg border border-emerald-200">
             <div className="text-emerald-700 font-medium">Toleransı Sağlayanlar</div>
@@ -87,7 +90,7 @@ export const LoopClosureTab: React.FC<Props> = ({
             }`}
           >
             <div className="font-medium">Toleransı Aşanlar</div>
-            <div className="text-base font-bold font-mono mt-0.5">{failedLoops} Döngü</div>
+            <div className="text-base font-bold font-mono mt-0.5">{failedLoops} Üçgen</div>
           </div>
           <div className="p-2.5 bg-sky-50 rounded-lg border border-sky-200">
             <div className="text-sky-700 font-medium">Ortalama Bağıl Hassasiyet</div>
@@ -103,7 +106,7 @@ export const LoopClosureTab: React.FC<Props> = ({
           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
             <div className="flex items-center gap-2">
               <RotateCcw className="w-4 h-4 text-emerald-600" />
-              <h3 className="text-sm font-bold text-slate-900">Döngü Kapanış Tablosu</h3>
+              <h3 className="text-sm font-bold text-slate-900">Loop Closure Tablosu</h3>
             </div>
             <span className="text-xs text-slate-400">
               Kısayol: <kbd className="px-1.5 py-0.5 bg-slate-100 border border-slate-300 rounded font-mono font-bold text-slate-700">Ctrl+L</kbd>
@@ -272,6 +275,22 @@ export const LoopClosureTab: React.FC<Props> = ({
               </div>
             </div>
           )}
+        </div>
+      </div>
+
+      {/* Network Map Section */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 mt-6">
+        <h3 className="text-sm font-bold text-slate-900 border-b border-slate-100 pb-3 mb-4 flex items-center gap-2">
+          <Layers className="w-4 h-4 text-purple-600" />
+          <span>İnteraktif Jeodezik Ağ Haritası (Loop Closure & Ağ Yapısı)</span>
+        </h3>
+        <div className="h-[450px] relative rounded-lg overflow-hidden border border-slate-200">
+          <MapTab
+            stations={stations}
+            baselines={baselines}
+            loopClosures={loopClosures}
+            adjustmentResult={adjustmentResult}
+          />
         </div>
       </div>
     </div>

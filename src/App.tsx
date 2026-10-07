@@ -28,7 +28,6 @@ import { BaselinesTab } from './components/BaselinesTab';
 import { LoopClosureTab } from './components/LoopClosureTab';
 import { AdjustmentTab } from './components/AdjustmentTab';
 import { FixedCoordinatesTab } from './components/FixedCoordinatesTab';
-import { EpochGeoCalcTab } from './components/EpochGeoCalcTab';
 import { MapTab } from './components/MapTab';
 import { ReportExportTab } from './components/ReportExportTab';
 import { PWAInstallButton } from './components/PWAInstallButton';
@@ -61,8 +60,6 @@ type TabKey =
   | 'free_adjustment'
   | 'fixed_coords'
   | 'constrained_adjustment'
-  | 'epoch'
-  | 'map'
   | 'report';
 
 export default function App() {
@@ -379,7 +376,7 @@ export default function App() {
             }`}
           >
             <RotateCcw className="w-4 h-4 text-amber-600" />
-            <span>Döngü Kapanış</span>
+            <span>Loop Closure</span>
             <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full text-[10px] font-bold">
               {loopClosures.length}
             </span>
@@ -436,30 +433,6 @@ export default function App() {
           </button>
 
           <button
-            onClick={() => setActiveTab('epoch')}
-            className={`px-3.5 py-2.5 text-xs sm:text-sm font-semibold border-b-2 flex items-center gap-2 whitespace-nowrap transition cursor-pointer ${
-              activeTab === 'epoch'
-                ? 'border-sky-600 text-sky-600'
-                : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <TrendingUp className="w-4 h-4 text-teal-600" />
-            <span>Epok & GeoCalc</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('map')}
-            className={`px-3.5 py-2.5 text-xs sm:text-sm font-semibold border-b-2 flex items-center gap-2 whitespace-nowrap transition cursor-pointer ${
-              activeTab === 'map'
-                ? 'border-sky-600 text-sky-600'
-                : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <MapPin className="w-4 h-4 text-rose-600" />
-            <span>Ağ Haritası</span>
-          </button>
-
-          <button
             onClick={() => setActiveTab('report')}
             className={`px-3.5 py-2.5 text-xs sm:text-sm font-semibold border-b-2 flex items-center gap-2 whitespace-nowrap transition cursor-pointer ${
               activeTab === 'report'
@@ -511,6 +484,7 @@ export default function App() {
             loopClosures={loopClosures}
             stations={stations}
             baselines={baselines}
+            adjustmentResult={adjustmentResult}
             onRecalculateLoops={handleRecalculateLoops}
           />
         )}
@@ -546,23 +520,6 @@ export default function App() {
             onRunAdjustment={handleRunAdjustment}
             onExcludeOutliersAndReAdjust={handleExcludeOutliersAndReAdjust}
             isLoading={isLoading}
-          />
-        )}
-
-        {activeTab === 'epoch' && (
-          <EpochGeoCalcTab
-            stations={stations}
-            config={config}
-            onUpdateConfig={setConfig}
-          />
-        )}
-
-        {activeTab === 'map' && (
-          <MapTab
-            stations={stations}
-            baselines={baselines}
-            loopClosures={loopClosures}
-            adjustmentResult={adjustmentResult}
           />
         )}
 
