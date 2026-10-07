@@ -50,6 +50,8 @@ import {
   AlertTriangle,
   Play,
   Zap,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 
 type TabKey =
@@ -61,6 +63,17 @@ type TabKey =
   | 'fixed_coords'
   | 'constrained_adjustment'
   | 'report';
+
+const WORKFLOW_STEPS: { id: TabKey; title: string; subtitle: string }[] = [
+  { id: 'settings', title: 'Proje Ayarları', subtitle: 'Referans elipsoit, projeksiyon ve tolerans tanımları' },
+  { id: 'stations', title: 'Veri Girişi', subtitle: 'Rover & TUSAGA RINEX verileri, 2005 epok hızları ve IGS hassas yörünge' },
+  { id: 'baselines', title: 'Bazlar & RTKLIB', subtitle: 'Çift fark baz vektörü türetme ve RTKLIB çözümü' },
+  { id: 'loops', title: 'Loop Closure', subtitle: '3D kapalı üçgen döngüleri ve ağ haritası analizi' },
+  { id: 'free_adjustment', title: 'Serbest Dengeleme', subtitle: 'İç tutarlılık ve kaba hata (Baarda w-testi) dengelemesi' },
+  { id: 'fixed_coords', title: 'Sabit Koordinatlar', subtitle: 'TUSAGA-Aktif resmi bilinen koordinat girişi' },
+  { id: 'constrained_adjustment', title: 'Dayalı Dengeleme', subtitle: 'CORS sabitli nihai 3D Gauss-Markov dengelemesi' },
+  { id: 'report', title: 'Rapor & Çıktı', subtitle: 'Resmi BÖHYY dengeleme karnesi ve dışa aktarım' },
+];
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabKey>('settings');
@@ -174,24 +187,6 @@ export default function App() {
     showToast(`${outlierIds.length} adet kaba hatalı baz elendi ve ağ yeniden dengelendi.`);
   };
 
-  // Keyboard Shortcuts (Ctrl+L for Loops, F8 for Adjustment)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'l' || e.key === 'L')) {
-        e.preventDefault();
-        handleRecalculateLoops();
-        setActiveTab('loops');
-      } else if (e.key === 'F8') {
-        e.preventDefault();
-        handleRunAdjustment('constrained');
-        setActiveTab('constrained_adjustment');
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleRecalculateLoops, handleRunAdjustment]);
-
   // Station Handlers
   const handleUpdateStation = (st: Station) => {
     const next = { ...stations, [st.id]: st };
@@ -199,24 +194,7 @@ export default function App() {
   };
 
   const handleAddStation = (st: Station) => {
-    setStations((prev) => {
-      const next = { ...prev, [st.id]: st };
-      // Automatically generate/refresh baselines when 2 or more stations exist
-      if (Object.keys(next).length >= 2) {
-        setTimeout(() => {
-          const generated = generateBaselinesFromStations(next);
-          setBaselines(generated);
-          const loops = calculateLoopClosures(
-            next,
-            generated,
-            config.loopToleranceBaseMm,
-            config.loopTolerancePpm
-          );
-          setLoopClosures(loops);
-        }, 100);
-      }
-      return next;
-    });
+    setStations((prev) => ({ ...prev, [st.id]: st }));
   };
 
   const handleDeleteStation = (id: string) => {
@@ -341,7 +319,7 @@ export default function App() {
             }`}
           >
             <Radio className="w-4 h-4 text-sky-600" />
-            <span>Rinex Veriler</span>
+            <span>Veri Girişi</span>
             <span className="bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full text-[10px] font-bold">
               {stationCount}
             </span>
@@ -454,6 +432,7 @@ export default function App() {
             stations={stations}
             dom={config.dom}
             timeZone={config.timeZone}
+            surveyEpoch={config.surveyEpoch}
             onUpdateStation={handleUpdateStation}
             onAddStation={handleAddStation}
             onDeleteStation={handleDeleteStation}
@@ -501,7 +480,6 @@ export default function App() {
             config={config}
             onUpdateStation={handleUpdateStation}
             onNavigateToConstrainedAdjustment={() => {
-              handleRunAdjustment('constrained');
               setActiveTab('constrained_adjustment');
             }}
           />
@@ -526,6 +504,61 @@ export default function App() {
             stations={stations}
           />
         )}
+
+        {/* Step Transition Navigation Bar */}
+        {(() => {
+          const currentStepIndex = WORKFLOW_STEPS.findIndex((s) => s.id === activeTab);
+          const prevStep = currentStepIndex > 0 ? WORKFLOW_STEPS[currentStepIndex - 1] : null;
+          const nextStep = currentStepIndex < WORKFLOW_STEPS.length - 1 ? WORKFLOW_STEPS[currentStepIndex + 1] : null;
+
+          return (
+            <div className="mt-8 pt-5 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4 no-print bg-white p-4 rounded-xl shadow-xs border border-slate-200">
+              <div>
+                {prevStep ? (
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab(prevStep.id)}
+                    className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg shadow-2xs transition cursor-pointer active:scale-95"
+                  >
+                    <ChevronLeft className="w-4 h-4 text-slate-600" />
+                    <span>Önceki Adım: {prevStep.title}</span>
+                  </button>
+                ) : (
+                  <div className="text-xs text-slate-400 font-semibold px-2">
+                    1. Adım / Başlangıç
+                  </div>
+                )}
+              </div>
+
+              <div className="text-xs text-slate-500 font-medium text-center">
+                Adım {currentStepIndex + 1} / {WORKFLOW_STEPS.length}:{' '}
+                <span className="font-bold text-slate-800">{WORKFLOW_STEPS[currentStepIndex]?.title}</span>
+              </div>
+
+              <div>
+                {nextStep ? (
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab(nextStep.id)}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 text-xs sm:text-sm font-bold text-white bg-sky-600 hover:bg-sky-700 rounded-lg shadow-sm hover:shadow transition cursor-pointer active:scale-95"
+                  >
+                    <span>Sonraki Adıma Geç ({nextStep.title})</span>
+                    <ChevronRight className="w-4 h-4 text-white" />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => window.print()}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 text-xs sm:text-sm font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-lg shadow-sm transition cursor-pointer active:scale-95"
+                  >
+                    <FileText className="w-4 h-4 text-sky-400" />
+                    <span>Raporu Yazdır / PDF</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })()}
       </main>
 
       {/* Toast Notification Popup */}

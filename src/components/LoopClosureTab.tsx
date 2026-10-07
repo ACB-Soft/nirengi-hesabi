@@ -65,7 +65,7 @@ export const LoopClosureTab: React.FC<Props> = ({
               className="px-4 py-2 text-xs font-bold bg-sky-600 hover:bg-sky-700 text-white rounded-lg shadow-sm transition cursor-pointer flex items-center gap-1.5"
             >
               <Zap className="w-3.5 h-3.5 text-amber-300" />
-              <span>Döngüleri Yeniden Hesapla (Ctrl+L)</span>
+              <span>Döngüleri Hesapla</span>
             </button>
           </div>
         </div>

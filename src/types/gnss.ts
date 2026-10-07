@@ -265,3 +265,32 @@ export interface RinexOccupation {
   observationTypes: string[]; // e.g. ["L1", "L2", "C1", "P2", "S1", "S2"]
   approxPosition?: { x: number; y: number; z: number };
 }
+
+export interface IgsOrbitInfo {
+  gpsWeek: number;
+  dayOfWeek: number;
+  dateStr: string;
+  year: number;
+  doy: number;
+  productType: 'FINAL' | 'RAPID' | 'ULTRA_RAPID';
+  productName: string;
+  clkName: string;
+  cddisUrl: string;
+  ignUrl: string;
+  bkgUrl: string;
+  latencyDays: number;
+  accuracyEstimate: string;
+  recommendationText: string;
+  isLoaded?: boolean;
+  loadedFileName?: string;
+}
+
+export interface IgsSp3File {
+  fileName: string;
+  gpsWeek: number;
+  dayOfWeek: number;
+  epochCount: number;
+  satelliteCount: number;
+  satellites: string[];
+  productType: 'FINAL' | 'RAPID' | 'ULTRA_RAPID';
+}

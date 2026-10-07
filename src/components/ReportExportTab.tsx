@@ -38,8 +38,7 @@ export const ReportExportTab: React.FC<Props> = ({
         <FileText className="w-12 h-12 text-slate-300 mx-auto" />
         <h3 className="text-base font-bold text-slate-800">Henüz Dengeleme Hesabı Yapılmadı</h3>
         <p className="text-xs text-slate-500 max-w-md mx-auto">
-          Rapor ve çıktı alabilmek için lütfen "3D Ağ Dengelemesi" sekmesinden veya F8 kısayolu ile 
-          dengeleme hesabını çalıştırınız.
+          Rapor ve çıktı alabilmek için lütfen "Dayalı Dengeleme" sekmesinden dengeleme hesabını çalıştırınız.
         </p>
       </div>
     );
