@@ -274,10 +274,15 @@ export interface IgsOrbitInfo {
   doy: number;
   productType: 'FINAL' | 'RAPID' | 'ULTRA_RAPID';
   productName: string;
+  longFormatName: string;
   clkName: string;
+  longFormatClkName: string;
   cddisUrl: string;
   ignUrl: string;
+  ignFolderUrl: string;
   bkgUrl: string;
+  bkgFolderUrl: string;
+  sopacUrl: string;
   latencyDays: number;
   accuracyEstimate: string;
   recommendationText: string;

@@ -2192,6 +2192,72 @@ export function estimateVelocitiesByTUTGA(
 }
 
 /**
+ * Converts Cartesian ECEF velocities (vx, vy, vz in m/year) to local topocentric velocities (ve, vn, vu in mm/year)
+ * based on the station's latitude (latDeg) and longitude (lonDeg).
+ */
+export function cartesianToTopocentricVelocity(
+  vx: number,
+  vy: number,
+  vz: number,
+  latDeg: number = 39.0,
+  lonDeg: number = 35.0
+): { ve: number; vn: number; vu: number } {
+  const phi = (latDeg * Math.PI) / 180.0;
+  const lam = (lonDeg * Math.PI) / 180.0;
+
+  const sinPhi = Math.sin(phi);
+  const cosPhi = Math.cos(phi);
+  const sinLam = Math.sin(lam);
+  const cosLam = Math.cos(lam);
+
+  // R_enu * [vx, vy, vz]^T
+  const ve = -sinLam * vx + cosLam * vy;
+  const vn = -sinPhi * cosLam * vx - sinPhi * sinLam * vy + cosPhi * vz;
+  const vu = cosPhi * cosLam * vx + cosPhi * sinLam * vy + sinPhi * vz;
+
+  return {
+    ve: Number((ve * 1000.0).toFixed(2)), // mm/year
+    vn: Number((vn * 1000.0).toFixed(2)), // mm/year
+    vu: Number((vu * 1000.0).toFixed(2)), // mm/year
+  };
+}
+
+/**
+ * Converts local topocentric velocities (ve, vn, vu in mm/year) to Cartesian ECEF velocities (vx, vy, vz in m/year)
+ * based on the station's latitude (latDeg) and longitude (lonDeg).
+ */
+export function topocentricToCartesianVelocity(
+  veMm: number,
+  vnMm: number,
+  vuMm: number,
+  latDeg: number = 39.0,
+  lonDeg: number = 35.0
+): { vx: number; vy: number; vz: number } {
+  const phi = (latDeg * Math.PI) / 180.0;
+  const lam = (lonDeg * Math.PI) / 180.0;
+
+  const sinPhi = Math.sin(phi);
+  const cosPhi = Math.cos(phi);
+  const sinLam = Math.sin(lam);
+  const cosLam = Math.cos(lam);
+
+  const e = veMm / 1000.0;
+  const n = vnMm / 1000.0;
+  const u = vuMm / 1000.0;
+
+  // R_enu^T * [e, n, u]^T
+  const vx = -sinLam * e - sinPhi * cosLam * n + cosPhi * cosLam * u;
+  const vy = cosLam * e - sinPhi * sinLam * n + cosPhi * sinLam * u;
+  const vz = cosPhi * n + sinPhi * u;
+
+  return {
+    vx: Number(vx.toFixed(5)), // m/year
+    vy: Number(vy.toFixed(5)), // m/year
+    vz: Number(vz.toFixed(5)), // m/year
+  };
+}
+
+/**
  * Topcon Tools & GeoCalculator Adım 7:
  * TUSAGA-Aktif Dayanak Noktası Koordinatlarını 2005.00 Referans Epoğundan
  * Ölçü Epoğuna (t) Öteler (Dayalı Dengeleme Öncesi Hazırlık).

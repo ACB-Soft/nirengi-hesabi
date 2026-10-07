@@ -28,6 +28,8 @@ import {
   getIgsProductDetails,
   parseIgsSp3File,
   TUSAGA_VELOCITY_CATALOG,
+  cartesianToTopocentricVelocity,
+  topocentricToCartesianVelocity,
 } from '../utils/geodesy';
 import {
   NOAA_ANTCAL_CATALOG,
@@ -251,22 +253,19 @@ export const StationsAntennaTab: React.FC<Props> = ({
 
           const isFixedStatus = pointType === 'CORS';
 
-          // Assign default or catalog velocity
-          const nameUpper = stnName.toUpperCase().substring(0, 4);
-          const catalogVel = TUSAGA_VELOCITY_CATALOG[nameUpper] || TUSAGA_VELOCITY_CATALOG.DEFAULT;
-
+          // Default velocities to 0 so the user explicitly enters official karne velocities
           const finalStation: Station = {
             ...(rinexStn as Station),
             name: stnName,
             type: pointType,
             isFixed: { x: isFixedStatus, y: isFixedStatus, z: isFixedStatus },
             velocities: {
-              vx: catalogVel.vx,
-              vy: catalogVel.vy,
-              vz: catalogVel.vz,
-              ve: catalogVel.ve,
-              vn: catalogVel.vn,
-              vu: catalogVel.vu,
+              vx: 0,
+              vy: 0,
+              vz: 0,
+              ve: 0,
+              vn: 0,
+              vu: 0,
             },
           };
 
@@ -647,28 +646,21 @@ export const StationsAntennaTab: React.FC<Props> = ({
               </span>
             </div>
             <div>
-              <h3 className="text-xs font-bold text-slate-900">TUSAGA 2005 Epok Hızları</h3>
+              <h3 className="text-xs font-bold text-slate-900">TUSAGA Onaylı Epok Hızları</h3>
               <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
-                Anadolu plaka tektoniği ($V_x, V_y, V_z$). $X(t) = X_{2005} + V_x \cdot (t - 2005.00)$.
+                TUSAGA-Aktif resmi istasyon karnesindeki onaylı $V_x, V_y, V_z$ (veya $V_e, V_n, V_u$) hızları.
               </p>
             </div>
           </div>
 
           <div className="pt-3 mt-3 border-t border-slate-100 flex items-center gap-1.5">
             <button
-              onClick={handleAutoApplyTusagaVelocities}
-              className="flex-1 py-2 px-2 text-[11px] font-bold bg-purple-700 hover:bg-purple-800 text-white rounded-lg shadow-xs transition cursor-pointer flex items-center justify-center gap-1 text-center"
-              title="Resmi TUSAGA-Aktif hız kataloğundaki değerleri istasyonlara ata"
-            >
-              <TrendingUp className="w-3 h-3" />
-              <span>Hızları Otomatik Ata</span>
-            </button>
-            <button
               onClick={() => handleOpenVelocityModal()}
-              className="py-2 px-2.5 text-[11px] font-bold bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-300 rounded-lg transition cursor-pointer"
-              title="İstasyon bazında hızları düzenle"
+              className="flex-1 py-2 px-2 text-[11px] font-bold bg-purple-700 hover:bg-purple-800 text-white rounded-lg shadow-xs transition cursor-pointer flex items-center justify-center gap-1.5 text-center"
+              title="Resmi istasyon karnesinden onaylı hız değerlerini manuel veya toplu olarak giriniz"
             >
-              <Edit2 className="w-3 h-3" />
+              <TrendingUp className="w-3.5 h-3.5" />
+              <span>Onaylı Hızları Gir / Düzenle</span>
             </button>
           </div>
         </div>
@@ -1198,16 +1190,19 @@ export const StationsAntennaTab: React.FC<Props> = ({
       {/* 3. TUSAGA 2005 EPOCH VELOCITY MODAL */}
       {/* ========================================================================= */}
       {isVelocityModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden animate-in fade-in duration-150">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-xl w-full overflow-hidden animate-in fade-in duration-150">
             <div className="p-5 border-b border-slate-200 bg-slate-900 text-white flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <TrendingUp className="w-5 h-5 text-purple-400" />
-                <h3 className="font-bold text-base">
-                  {editingVelocityStationId
-                    ? `Tektonik Hız Düzenle: ${stations[editingVelocityStationId]?.name}`
-                    : 'Tüm İstasyonlar İçin Tektonik Plaka Hızları'}
-                </h3>
+                <div>
+                  <h3 className="font-bold text-base">
+                    TUSAGA-Aktif Onaylı Hız Bilgisi Girişi
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Resmi istasyon karnesinden alınan 2005.00 epok hızları ($V_x, V_y, V_z$)
+                  </p>
+                </div>
               </div>
               <button
                 onClick={() => setIsVelocityModalOpen(false)}
@@ -1218,49 +1213,121 @@ export const StationsAntennaTab: React.FC<Props> = ({
             </div>
 
             <div className="p-6 space-y-4 text-xs">
-              <p className="text-slate-600 leading-relaxed">
-                TUREF / ITRF96 (2005.00) epoğu ile ölçü anı ($t = {surveyEpoch.toFixed(2)}$) arasındaki 
-                koordinat ötelemesi için kartezyen ECEF ($V_x, V_y, V_z$) veya topomerkez ($V_e, V_n, V_u$) hız değerlerini giriniz:
-              </p>
+              <div className="bg-amber-50 border border-amber-200 p-3 rounded-xl text-amber-900 text-[11px] leading-relaxed flex items-start gap-2">
+                <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <strong>BÖHYY & HGM Standartları:</strong> Harita Genel Müdürlüğü (HGM) veya TUSAGA-Aktif resmi portalından indirilen istasyon karnenizde belirtilen kesin onaylı hız bileşenlerini giriniz. Hız düzeltmesi uygulamak istemiyorsanız <strong>"Hızları Sıfırla (V = 0)"</strong> butonunu kullanabilirsiniz.
+                </div>
+              </div>
 
+              {/* Station Selection Dropdown */}
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">Hedef İstasyon</label>
+                <select
+                  value={editingVelocityStationId || 'ALL'}
+                  onChange={(e) => {
+                    const val = e.target.value === 'ALL' ? null : e.target.value;
+                    setEditingVelocityStationId(val);
+                    if (val && stations[val]?.velocities) {
+                      const v = stations[val].velocities;
+                      setTempVx(v.vx || 0);
+                      setTempVy(v.vy || 0);
+                      setTempVz(v.vz || 0);
+                      setTempVe(v.ve || 0);
+                      setTempVn(v.vn || 0);
+                      setTempVu(v.vu || 0);
+                    }
+                  }}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white font-semibold"
+                >
+                  <option value="ALL">Tüm İstasyonlara Uygula ({sortedStations.length} Nokta)</option>
+                  {sortedStations.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} ({s.type === 'CORS' ? 'TUSAGA Sabit' : 'Ara Nokta'})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Cartesian ECEF Velocities Inputs */}
               <div className="space-y-3 bg-purple-50/60 p-4 rounded-xl border border-purple-200">
-                <h4 className="font-bold text-purple-950">Kartezyen ECEF Hızları (m/yıl)</h4>
+                <div className="flex items-center justify-between">
+                  <h4 className="font-bold text-purple-950">Onaylı Kartezyen ECEF Hızları (m/yıl)</h4>
+                  <span className="text-[10px] text-purple-700 font-mono">X(t) = X_2005 + Vx*(t-2005)</span>
+                </div>
                 <div className="grid grid-cols-3 gap-2 font-mono">
                   <div>
-                    <label className="block text-slate-600 text-[11px] mb-1 font-sans">Vx (m/yıl)</label>
+                    <label className="block text-slate-600 text-[11px] mb-1 font-sans font-bold">Vx (m/yıl)</label>
                     <input
                       type="number"
                       step="0.0001"
                       value={tempVx}
-                      onChange={(e) => setTempVx(parseFloat(e.target.value) || 0)}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value) || 0;
+                        setTempVx(val);
+                        const targetSt = editingVelocityStationId ? stations[editingVelocityStationId] : null;
+                        const lat = targetSt?.lat || 39.0;
+                        const lon = targetSt?.lon || 35.0;
+                        const topo = cartesianToTopocentricVelocity(val, tempVy, tempVz, lat, lon);
+                        setTempVe(topo.ve);
+                        setTempVn(topo.vn);
+                        setTempVu(topo.vu);
+                      }}
+                      placeholder="0.0000"
                       className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-bold"
                     />
                   </div>
                   <div>
-                    <label className="block text-slate-600 text-[11px] mb-1 font-sans">Vy (m/yıl)</label>
+                    <label className="block text-slate-600 text-[11px] mb-1 font-sans font-bold">Vy (m/yıl)</label>
                     <input
                       type="number"
                       step="0.0001"
                       value={tempVy}
-                      onChange={(e) => setTempVy(parseFloat(e.target.value) || 0)}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value) || 0;
+                        setTempVy(val);
+                        const targetSt = editingVelocityStationId ? stations[editingVelocityStationId] : null;
+                        const lat = targetSt?.lat || 39.0;
+                        const lon = targetSt?.lon || 35.0;
+                        const topo = cartesianToTopocentricVelocity(tempVx, val, tempVz, lat, lon);
+                        setTempVe(topo.ve);
+                        setTempVn(topo.vn);
+                        setTempVu(topo.vu);
+                      }}
+                      placeholder="0.0000"
                       className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-bold"
                     />
                   </div>
                   <div>
-                    <label className="block text-slate-600 text-[11px] mb-1 font-sans">Vz (m/yıl)</label>
+                    <label className="block text-slate-600 text-[11px] mb-1 font-sans font-bold">Vz (m/yıl)</label>
                     <input
                       type="number"
                       step="0.0001"
                       value={tempVz}
-                      onChange={(e) => setTempVz(parseFloat(e.target.value) || 0)}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value) || 0;
+                        setTempVz(val);
+                        const targetSt = editingVelocityStationId ? stations[editingVelocityStationId] : null;
+                        const lat = targetSt?.lat || 39.0;
+                        const lon = targetSt?.lon || 35.0;
+                        const topo = cartesianToTopocentricVelocity(tempVx, tempVy, val, lat, lon);
+                        setTempVe(topo.ve);
+                        setTempVn(topo.vn);
+                        setTempVu(topo.vu);
+                      }}
+                      placeholder="0.0000"
                       className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-bold"
                     />
                   </div>
                 </div>
               </div>
 
+              {/* Topocentric Velocities Inputs */}
               <div className="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
-                <h4 className="font-bold text-slate-800">Yerel Toposentrik Hızlar (mm/yıl)</h4>
+                <div className="flex items-center justify-between">
+                  <h4 className="font-bold text-slate-800">Yerel Toposentrik Hızlar (mm/yıl)</h4>
+                  <span className="text-[10px] text-slate-500 font-mono">Ve, Vn, Vu (mm/yıl)</span>
+                </div>
                 <div className="grid grid-cols-3 gap-2 font-mono">
                   <div>
                     <label className="block text-slate-600 text-[11px] mb-1 font-sans">Ve (Doğu - mm/yıl)</label>
@@ -1268,7 +1335,18 @@ export const StationsAntennaTab: React.FC<Props> = ({
                       type="number"
                       step="0.1"
                       value={tempVe}
-                      onChange={(e) => setTempVe(parseFloat(e.target.value) || 0)}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value) || 0;
+                        setTempVe(val);
+                        const targetSt = editingVelocityStationId ? stations[editingVelocityStationId] : null;
+                        const lat = targetSt?.lat || 39.0;
+                        const lon = targetSt?.lon || 35.0;
+                        const cart = topocentricToCartesianVelocity(val, tempVn, tempVu, lat, lon);
+                        setTempVx(cart.vx);
+                        setTempVy(cart.vy);
+                        setTempVz(cart.vz);
+                      }}
+                      placeholder="0.0"
                       className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white"
                     />
                   </div>
@@ -1278,7 +1356,18 @@ export const StationsAntennaTab: React.FC<Props> = ({
                       type="number"
                       step="0.1"
                       value={tempVn}
-                      onChange={(e) => setTempVn(parseFloat(e.target.value) || 0)}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value) || 0;
+                        setTempVn(val);
+                        const targetSt = editingVelocityStationId ? stations[editingVelocityStationId] : null;
+                        const lat = targetSt?.lat || 39.0;
+                        const lon = targetSt?.lon || 35.0;
+                        const cart = topocentricToCartesianVelocity(tempVe, val, tempVu, lat, lon);
+                        setTempVx(cart.vx);
+                        setTempVy(cart.vy);
+                        setTempVz(cart.vz);
+                      }}
+                      placeholder="0.0"
                       className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white"
                     />
                   </div>
@@ -1288,11 +1377,53 @@ export const StationsAntennaTab: React.FC<Props> = ({
                       type="number"
                       step="0.1"
                       value={tempVu}
-                      onChange={(e) => setTempVu(parseFloat(e.target.value) || 0)}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value) || 0;
+                        setTempVu(val);
+                        const targetSt = editingVelocityStationId ? stations[editingVelocityStationId] : null;
+                        const lat = targetSt?.lat || 39.0;
+                        const lon = targetSt?.lon || 35.0;
+                        const cart = topocentricToCartesianVelocity(tempVe, tempVn, val, lat, lon);
+                        setTempVx(cart.vx);
+                        setTempVy(cart.vy);
+                        setTempVz(cart.vz);
+                      }}
+                      placeholder="0.0"
                       className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white"
                     />
                   </div>
                 </div>
+              </div>
+
+              {/* Quick Preset Buttons */}
+              <div className="flex items-center justify-between gap-2 pt-1 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTempVx(0);
+                    setTempVy(0);
+                    setTempVz(0);
+                    setTempVe(0);
+                    setTempVn(0);
+                    setTempVu(0);
+                  }}
+                  className="px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-100 text-slate-700 font-semibold text-[11px] cursor-pointer"
+                >
+                  Sıfırla (Hız Etkisi Yok: V = 0)
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleAutoApplyTusagaVelocities();
+                    setIsVelocityModalOpen(false);
+                  }}
+                  className="px-3 py-1.5 rounded-lg border border-purple-300 bg-purple-50 hover:bg-purple-100 text-purple-900 font-semibold text-[11px] cursor-pointer inline-flex items-center gap-1"
+                  title="HGM TUSAGA-Aktif literatür örnek hız kataloğundan doldur"
+                >
+                  <Database className="w-3.5 h-3.5 text-purple-700" />
+                  <span>Örnek HGM Kataloğunu Doldur (İsteğe Bağlı)</span>
+                </button>
               </div>
             </div>
 
@@ -1310,7 +1441,7 @@ export const StationsAntennaTab: React.FC<Props> = ({
                 className="px-5 py-2 rounded-lg bg-purple-700 hover:bg-purple-800 text-white font-bold shadow-sm transition cursor-pointer flex items-center gap-1.5"
               >
                 <Save className="w-4 h-4" />
-                <span>Hızları Kaydet</span>
+                <span>Onaylı Hızları Kaydet</span>
               </button>
             </div>
           </div>
