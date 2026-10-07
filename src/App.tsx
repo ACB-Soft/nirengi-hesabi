@@ -299,16 +299,11 @@ export default function App() {
                 className="w-11 h-11 sm:w-12 sm:h-12 object-contain shrink-0 drop-shadow-md hover:scale-105 transition-transform"
               />
               <div>
-                <div className="flex items-center gap-2">
-                  <h1 className="text-base sm:text-lg font-bold tracking-tight text-white">
-                    Nirengi Hesabı
-                  </h1>
-                  <span className="hidden sm:inline-block bg-sky-500/20 text-sky-300 text-[10px] font-mono px-2 py-0.5 rounded border border-sky-400/30">
-                    v1.0
-                  </span>
-                </div>
+                <h1 className="text-base sm:text-lg font-bold tracking-tight text-white">
+                  Nirengi Hesabı
+                </h1>
                 <p className="text-xs text-slate-400 hidden sm:block">
-                  Topcon &amp; Trimble Mimarili 3D Gauss-Markov Ağ Dengeleme Motoru
+                  Dayalı GNSS Nirengi Dengeleme Uygulaması
                 </p>
               </div>
             </div>
@@ -542,7 +537,7 @@ export default function App() {
       )}
 
       {/* Footer */}
-      <footer className="bg-white border-t border-slate-200 py-4 mt-auto no-print text-center text-xs text-slate-500 font-semibold tracking-wide">
+      <footer className="bg-slate-900 border-t border-slate-800 py-4 mt-auto no-print text-center text-xs text-slate-400 font-medium tracking-wide">
         <div className="max-w-7xl mx-auto px-4 flex items-center justify-center">
           <div>
             ACB Maps - Nirengi Hesabı v1.0
