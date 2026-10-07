@@ -93,10 +93,10 @@ export default function App() {
   };
 
   useEffect(() => {
-    document.title = 'GNSS Nirengi Dengelemesi';
+    document.title = 'Nirengi Hesabı';
     try {
       if (window.top && window.top !== window) {
-        window.top.document.title = 'GNSS Nirengi Dengelemesi';
+        window.top.document.title = 'Nirengi Hesabı';
       }
     } catch {
       // Safe iframe guard
@@ -240,26 +240,6 @@ export default function App() {
     showToast('Tüm noktalar ve bazlar temizlendi.');
   };
 
-  // End-to-End Automated Topcon / Trimble 10-Step Workflow
-  const handleRunFullTopconWorkflow = useCallback(() => {
-    if (Object.keys(stations).length < 2) {
-      showToast('Tam otomatik dengeleme için ağda en az 2 nokta bulunmalıdır.');
-      return;
-    }
-    setIsLoading(true);
-    setTimeout(() => {
-      const res = runFullTopconWorkflow(stations, baselines, config);
-      setStations(res.finalStations);
-      setBaselines(res.baselines);
-      setLoopClosures(res.loopClosures);
-      setUnconstrainedResult(res.unconstrainedResult);
-      setConstrainedResult(res.constrainedResult);
-      setAdjustmentResult(res.constrainedResult || res.unconstrainedResult);
-      setIsLoading(false);
-      showToast('Topcon & Trimble 10 adımlı tam otomatik dengeleme ve epok aktarımı tamamlandı!');
-    }, 600);
-  }, [stations, baselines, config]);
-
   const handleGenerateBaselinesFromPoints = () => {
     if (Object.keys(stations).length < 2) {
       showToast('Baz ağı türetmek için en az 2 nokta bulunmalıdır.');
@@ -318,20 +298,20 @@ export default function App() {
             <div className="flex items-center space-x-3.5">
               <img
                 src="./icon.svg"
-                alt="GNSS Nirengi Dengelemesi Logo"
+                alt="Nirengi Hesabı Logo"
                 className="w-11 h-11 sm:w-12 sm:h-12 object-contain shrink-0 drop-shadow-md hover:scale-105 transition-transform"
               />
               <div>
                 <div className="flex items-center gap-2">
                   <h1 className="text-base sm:text-lg font-bold tracking-tight text-white">
-                    GNSS Nirengi Dengelemesi
+                    Nirengi Hesabı
                   </h1>
                   <span className="hidden sm:inline-block bg-sky-500/20 text-sky-300 text-[10px] font-mono px-2 py-0.5 rounded border border-sky-400/30">
-                    TUREF / ITRF96
+                    v1.0
                   </span>
                 </div>
                 <p className="text-xs text-slate-400 hidden sm:block">
-                  Topcon & Trimble Mimarili 3D Gauss-Markov Ağ Dengeleme & RTKLIB Motoru
+                  Topcon &amp; Trimble Mimarili 3D Gauss-Markov Ağ Dengeleme Motoru
                 </p>
               </div>
             </div>
@@ -542,7 +522,6 @@ export default function App() {
             config={config}
             onRunAdjustment={handleRunAdjustment}
             onExcludeOutliersAndReAdjust={handleExcludeOutliersAndReAdjust}
-            onRunFullWorkflow={handleRunFullTopconWorkflow}
             isLoading={isLoading}
           />
         )}
@@ -566,7 +545,6 @@ export default function App() {
             config={config}
             onRunAdjustment={handleRunAdjustment}
             onExcludeOutliersAndReAdjust={handleExcludeOutliersAndReAdjust}
-            onRunFullWorkflow={handleRunFullTopconWorkflow}
             isLoading={isLoading}
           />
         )}
@@ -607,13 +585,10 @@ export default function App() {
       )}
 
       {/* Footer */}
-      <footer className="bg-white border-t border-slate-200 py-4 mt-auto no-print text-center text-xs text-slate-500">
-        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
+      <footer className="bg-white border-t border-slate-200 py-4 mt-auto no-print text-center text-xs text-slate-500 font-semibold tracking-wide">
+        <div className="max-w-7xl mx-auto px-4 flex items-center justify-center">
           <div>
-            TUREF / ITRF96 GNSS 3D Post-Processing &amp; Ağ Dengeleme Motoru (BÖHYY Standartları)
-          </div>
-          <div className="text-[11px] text-slate-400">
-            Kısayollar: <kbd className="px-1.5 py-0.5 bg-slate-100 rounded border border-slate-300">Ctrl+L</kbd> Döngü Kapanış &bull; <kbd className="px-1.5 py-0.5 bg-slate-100 rounded border border-slate-300">F8</kbd> 3D Dengeleme
+            ACB Maps - Nirengi Hesabı v1.0
           </div>
         </div>
       </footer>

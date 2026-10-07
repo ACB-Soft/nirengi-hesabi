@@ -1,8 +1,8 @@
 {
   "id": "./",
-  "name": "Nivelman Hesabı",
-  "short_name": "Nivelman Hesabı",
-  "description": "Dayalı GNSS Nivelmanı Uygulaması",
+  "name": "Nirengi Hesabı",
+  "short_name": "Nirengi Hesabı",
+  "description": "Nirengi Hesabı Uygulaması",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

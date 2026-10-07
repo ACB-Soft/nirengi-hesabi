@@ -1,6 +1,6 @@
 {
-  "name": "GNSS Nirengi Dengelemesi",
-  "description": "GNSS Nirengi Dengeleme Uygulaması",
+  "name": "Nirengi Hesabı",
+  "description": "Nirengi Hesabı Uygulaması",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
