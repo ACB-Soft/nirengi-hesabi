@@ -1,7 +1,7 @@
 {
-  "id": "./",
+  "id": "nirengi-hesabi-pwa-id",
   "name": "Nirengi Hesabı",
-  "short_name": "Nirengi Hesabı",
+  "short_name": "Nirengi",
   "description": "Nirengi Hesabı Uygulaması",
   "start_url": "./",
   "scope": "./",
