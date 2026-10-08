@@ -30,6 +30,11 @@ import {
   TUSAGA_VELOCITY_CATALOG,
   cartesianToTopocentricVelocity,
   topocentricToCartesianVelocity,
+  computeStationEpochCoordinates,
+  ecefToGeodetic,
+  geodeticToEcef,
+  geodeticToTM,
+  tmToGeodetic,
 } from '../utils/geodesy';
 import {
   NOAA_ANTCAL_CATALOG,
@@ -125,6 +130,9 @@ export const StationsAntennaTab: React.FC<Props> = ({
   const [tempVe, setTempVe] = useState<number>(-21.5);
   const [tempVn, setTempVn] = useState<number>(14.0);
   const [tempVu, setTempVu] = useState<number>(1.0);
+  const [tempRefX, setTempRefX] = useState<number>(4118542.894);
+  const [tempRefY, setTempRefY] = useState<number>(2505234.321);
+  const [tempRefZ, setTempRefZ] = useState<number>(4082211.543);
 
   // IGS Orbit Product State
   const [loadedSp3File, setLoadedSp3File] = useState<IgsSp3File | null>(null);
@@ -254,11 +262,19 @@ export const StationsAntennaTab: React.FC<Props> = ({
           const isFixedStatus = pointType === 'CORS';
 
           // Default velocities to 0 so the user explicitly enters official karne velocities
-          const finalStation: Station = {
+          const rawStation: Station = {
             ...(rinexStn as Station),
             name: stnName,
             type: pointType,
             isFixed: { x: isFixedStatus, y: isFixedStatus, z: isFixedStatus },
+            refX: rinexStn.x,
+            refY: rinexStn.y,
+            refZ: rinexStn.z,
+            refLat: rinexStn.lat,
+            refLon: rinexStn.lon,
+            refH: rinexStn.h,
+            refProjY: rinexStn.projY,
+            refProjX: rinexStn.projX,
             velocities: {
               vx: 0,
               vy: 0,
@@ -269,6 +285,7 @@ export const StationsAntennaTab: React.FC<Props> = ({
             },
           };
 
+          const finalStation = computeStationEpochCoordinates(rawStation, surveyEpoch, dom);
           onAddStation(finalStation);
 
           const matched = matchAntennaInNoaaCatalog(finalStation.antenna?.model || '');
@@ -396,8 +413,11 @@ export const StationsAntennaTab: React.FC<Props> = ({
       const st = stations[id];
       const nameUpper = st.name.toUpperCase().substring(0, 4);
       const cat = TUSAGA_VELOCITY_CATALOG[nameUpper] || TUSAGA_VELOCITY_CATALOG.DEFAULT;
-      onUpdateStation({
+      const updatedRaw: Station = {
         ...st,
+        refX: st.refX ?? st.x,
+        refY: st.refY ?? st.y,
+        refZ: st.refZ ?? st.z,
         velocities: {
           vx: cat.vx,
           vy: cat.vy,
@@ -406,10 +426,12 @@ export const StationsAntennaTab: React.FC<Props> = ({
           vn: cat.vn,
           vu: cat.vu,
         },
-      });
+      };
+      const computed = computeStationEpochCoordinates(updatedRaw, surveyEpoch, dom);
+      onUpdateStation(computed);
       count++;
     }
-    setUploadFeedback(`${count} istasyona resmi TUSAGA-Aktif tektonik plaka hızları (ITRF96 / 2005.00) otomatik atandı.`);
+    setUploadFeedback(`${count} istasyona resmi TUSAGA-Aktif tektonik plaka hızları (ITRF96 / 2005.00) atandı ve t=${surveyEpoch.toFixed(2)} epoğundaki koordinatları hesaplandı.`);
   };
 
   /**
@@ -417,14 +439,22 @@ export const StationsAntennaTab: React.FC<Props> = ({
    */
   const handleOpenVelocityModal = (stationId?: string) => {
     setEditingVelocityStationId(stationId || null);
-    if (stationId && stations[stationId]?.velocities) {
-      const v = stations[stationId].velocities;
-      setTempVx(v.vx);
-      setTempVy(v.vy);
-      setTempVz(v.vz);
-      setTempVe(v.ve ?? -21.5);
-      setTempVn(v.vn ?? 14.0);
-      setTempVu(v.vu ?? 1.0);
+    const targetSt = stationId ? stations[stationId] : null;
+    if (targetSt) {
+      const v = targetSt.velocities;
+      setTempVx(v?.vx ?? -0.015);
+      setTempVy(v?.vy ?? -0.0218);
+      setTempVz(v?.vz ?? 0.0084);
+      setTempVe(v?.ve ?? -21.5);
+      setTempVn(v?.vn ?? 14.0);
+      setTempVu(v?.vu ?? 1.0);
+
+      const rx = targetSt.refX ?? targetSt.x ?? 4118542.894;
+      const ry = targetSt.refY ?? targetSt.y ?? 2505234.321;
+      const rz = targetSt.refZ ?? targetSt.z ?? 4082211.543;
+      setTempRefX(rx);
+      setTempRefY(ry);
+      setTempRefZ(rz);
     } else {
       setTempVx(-0.015);
       setTempVy(-0.0218);
@@ -432,6 +462,9 @@ export const StationsAntennaTab: React.FC<Props> = ({
       setTempVe(-21.5);
       setTempVn(14.0);
       setTempVu(1.0);
+      setTempRefX(4118542.894);
+      setTempRefY(2505234.321);
+      setTempRefZ(4082211.543);
     }
     setIsVelocityModalOpen(true);
   };
@@ -440,8 +473,11 @@ export const StationsAntennaTab: React.FC<Props> = ({
     if (editingVelocityStationId) {
       const st = stations[editingVelocityStationId];
       if (st) {
-        onUpdateStation({
+        const updatedRaw: Station = {
           ...st,
+          refX: tempRefX,
+          refY: tempRefY,
+          refZ: tempRefZ,
           velocities: {
             vx: tempVx,
             vy: tempVy,
@@ -450,26 +486,32 @@ export const StationsAntennaTab: React.FC<Props> = ({
             vn: tempVn,
             vu: tempVu,
           },
-        });
-        setUploadFeedback(`"${st.name}" istasyonunun 2005 epok hızları güncellendi.`);
+        };
+        const computed = computeStationEpochCoordinates(updatedRaw, surveyEpoch, dom);
+        onUpdateStation(computed);
+        setUploadFeedback(`"${computed.name}" istasyonunun 2005 epok koordinat ve hızları güncellendi. Dengeleme epoğu (t=${surveyEpoch.toFixed(2)}) koordinatları hesaplandı.`);
       }
     } else {
       // Apply to all CORS / Fixed stations
       for (const id in stations) {
         const st = stations[id];
-        onUpdateStation({
-          ...st,
-          velocities: {
-            vx: tempVx,
-            vy: tempVy,
-            vz: tempVz,
-            ve: tempVe,
-            vn: tempVn,
-            vu: tempVu,
-          },
-        });
+        if (st.type === 'CORS' || (st.isFixed.x && st.isFixed.y && st.isFixed.z)) {
+          const updatedRaw: Station = {
+            ...st,
+            velocities: {
+              vx: tempVx,
+              vy: tempVy,
+              vz: tempVz,
+              ve: tempVe,
+              vn: tempVn,
+              vu: tempVu,
+            },
+          };
+          const computed = computeStationEpochCoordinates(updatedRaw, surveyEpoch, dom);
+          onUpdateStation(computed);
+        }
       }
-      setUploadFeedback(`Tüm istasyonların tektonik plaka hızları güncellendi.`);
+      setUploadFeedback(`Tüm istasyonların tektonik plaka hızları güncellendi ve t=${surveyEpoch.toFixed(2)} koordinatları hesaplandı.`);
     }
     setIsVelocityModalOpen(false);
   };
@@ -812,8 +854,121 @@ export const StationsAntennaTab: React.FC<Props> = ({
           </div>
         </div>
       ) : (
-        /* Full Width Station Table */
-        <div className="w-full bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-4">
+        <>
+          {/* TUSAGA Sabit Noktaları — 2005.00 → Ölçü / Dengeleme Epoğu (t) Koordinat ve Hız Tablosu */}
+          {corsStations.length > 0 && (
+            <div className="w-full bg-white rounded-xl shadow-sm border border-purple-200 p-5 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-purple-100 pb-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-5 h-5 text-purple-600" />
+                    <h3 className="text-sm font-bold text-slate-900">
+                      TUSAGA Sabit Noktaları — 2005.00 Referans Epoğundan Ölçü/Dengeleme Epoğuna (t = {surveyEpoch.toFixed(2)}) Dönüşüm Tablosu
+                    </h3>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Resmi TUSAGA-Aktif portalından alınan 2005.00 koordinatları ve onaylı tektonik plaka hızları kullanılarak 
+                    ölçü/dengeleme epoğundaki (t = {surveyEpoch.toFixed(2)}, Δt = {(surveyEpoch - 2005.00).toFixed(2)} yıl) 
+                    Kartezyen (X, Y, Z), Geodezik (φ, λ, h) ve TM Projeksiyon koordinatları hesaplanmaktadır.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleOpenVelocityModal()}
+                    className="px-3 py-1.5 bg-purple-700 hover:bg-purple-800 text-white rounded-lg text-xs font-bold shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <TrendingUp className="w-3.5 h-3.5" />
+                    <span>Onaylı Hızları ve 2005 Koordinatlarını Düzenle</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-purple-50/70 text-purple-950 font-semibold border-b border-purple-200 whitespace-nowrap">
+                      <th className="py-2 px-3">İstasyon</th>
+                      <th className="py-2 px-3 text-right">X_2005 (m)</th>
+                      <th className="py-2 px-3 text-right">Y_2005 (m)</th>
+                      <th className="py-2 px-3 text-right">Z_2005 (m)</th>
+                      <th className="py-2 px-3 text-center">Onaylı Hızlar (Vx, Vy, Vz)</th>
+                      <th className="py-2 px-3 text-right text-purple-800">Toplam Kayma (cm)</th>
+                      <th className="py-2 px-3 text-right font-bold text-slate-900 bg-emerald-50/60">X(t) Ölçü (m)</th>
+                      <th className="py-2 px-3 text-right font-bold text-slate-900 bg-emerald-50/60">Y(t) Ölçü (m)</th>
+                      <th className="py-2 px-3 text-right font-bold text-slate-900 bg-emerald-50/60">Z(t) Ölçü (m)</th>
+                      <th className="py-2 px-3 text-right text-sky-800">TM Sağa Y (m)</th>
+                      <th className="py-2 px-3 text-right text-sky-800">TM Yukarı X (m)</th>
+                      <th className="py-2 px-3 text-right text-emerald-800">Elip. Kot h (m)</th>
+                      <th className="py-2 px-3 text-center">İşlem</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-purple-100 font-mono">
+                    {corsStations.map((st) => {
+                      const dt = surveyEpoch - 2005.00;
+                      const rX = st.refX ?? st.x;
+                      const rY = st.refY ?? st.y;
+                      const rZ = st.refZ ?? st.z;
+                      const vx = st.velocities?.vx || 0;
+                      const vy = st.velocities?.vy || 0;
+                      const vz = st.velocities?.vz || 0;
+                      const shiftM = Math.sqrt(
+                        Math.pow(vx * dt, 2) + Math.pow(vy * dt, 2) + Math.pow(vz * dt, 2)
+                      );
+
+                      return (
+                        <tr key={st.id} className="hover:bg-purple-50/40 transition">
+                          <td className="py-2.5 px-3 font-sans font-bold text-slate-900 flex items-center gap-1.5 whitespace-nowrap">
+                            <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                            <span>{st.name}</span>
+                          </td>
+                          <td className="py-2.5 px-3 text-right text-slate-600">{rX.toFixed(4)}</td>
+                          <td className="py-2.5 px-3 text-right text-slate-600">{rY.toFixed(4)}</td>
+                          <td className="py-2.5 px-3 text-right text-slate-600">{rZ.toFixed(4)}</td>
+                          <td className="py-2.5 px-3 text-center text-purple-700 font-bold whitespace-nowrap">
+                            {(vx * 1000).toFixed(1)}, {(vy * 1000).toFixed(1)}, {(vz * 1000).toFixed(1)} mm/yıl
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-bold text-purple-900">
+                            {(shiftM * 100).toFixed(1)} cm
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-bold text-slate-900 bg-emerald-50/40">
+                            {st.x.toFixed(4)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-bold text-slate-900 bg-emerald-50/40">
+                            {st.y.toFixed(4)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-bold text-slate-900 bg-emerald-50/40">
+                            {st.z.toFixed(4)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-bold text-sky-800">
+                            {st.projY.toFixed(4)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-bold text-sky-800">
+                            {st.projX.toFixed(4)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-bold text-emerald-800">
+                            {st.h.toFixed(4)}
+                          </td>
+                          <td className="py-2.5 px-3 text-center font-sans">
+                            <button
+                              onClick={() => handleOpenVelocityModal(st.id)}
+                              className="px-2 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded text-[10px] font-bold cursor-pointer"
+                            >
+                              Düzenle
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Full Width Station Table */}
+          <div className="w-full bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
             <div className="flex items-center gap-2">
               <Radio className="w-4 h-4 text-sky-600" />
@@ -1025,6 +1180,7 @@ export const StationsAntennaTab: React.FC<Props> = ({
             </table>
           </div>
         </div>
+        </>
       )}
 
       {/* ========================================================================= */}
@@ -1222,21 +1378,12 @@ export const StationsAntennaTab: React.FC<Props> = ({
 
               {/* Station Selection Dropdown */}
               <div>
-                <label className="block text-slate-700 font-bold mb-1">Hedef İstasyon</label>
+                <label className="block text-slate-700 font-bold mb-1 text-xs">Hedef İstasyon</label>
                 <select
                   value={editingVelocityStationId || 'ALL'}
                   onChange={(e) => {
-                    const val = e.target.value === 'ALL' ? null : e.target.value;
-                    setEditingVelocityStationId(val);
-                    if (val && stations[val]?.velocities) {
-                      const v = stations[val].velocities;
-                      setTempVx(v.vx || 0);
-                      setTempVy(v.vy || 0);
-                      setTempVz(v.vz || 0);
-                      setTempVe(v.ve || 0);
-                      setTempVn(v.vn || 0);
-                      setTempVu(v.vu || 0);
-                    }
+                    const val = e.target.value === 'ALL' ? undefined : e.target.value;
+                    handleOpenVelocityModal(val);
                   }}
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white font-semibold"
                 >
@@ -1249,11 +1396,59 @@ export const StationsAntennaTab: React.FC<Props> = ({
                 </select>
               </div>
 
+              {/* 2005.00 Epoch Coordinates Input (for individual station) */}
+              {editingVelocityStationId && (
+                <div className="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                      <ShieldCheck className="w-4 h-4 text-purple-600" />
+                      <span>2005.00 Referans Epok Kartezyen Koordinatları (m)</span>
+                    </h4>
+                    <span className="text-[10px] text-slate-500 font-mono">TUSAGA-Aktif Karnekod</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 font-mono">
+                    <div>
+                      <label className="block text-slate-600 text-[11px] mb-1 font-sans font-semibold">X_2005 (m)</label>
+                      <input
+                        type="number"
+                        step="0.0001"
+                        value={tempRefX}
+                        onChange={(e) => setTempRefX(parseFloat(e.target.value) || 0)}
+                        placeholder="4118542.894"
+                        className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-bold text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-600 text-[11px] mb-1 font-sans font-semibold">Y_2005 (m)</label>
+                      <input
+                        type="number"
+                        step="0.0001"
+                        value={tempRefY}
+                        onChange={(e) => setTempRefY(parseFloat(e.target.value) || 0)}
+                        placeholder="2505234.321"
+                        className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-bold text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-600 text-[11px] mb-1 font-sans font-semibold">Z_2005 (m)</label>
+                      <input
+                        type="number"
+                        step="0.0001"
+                        value={tempRefZ}
+                        onChange={(e) => setTempRefZ(parseFloat(e.target.value) || 0)}
+                        placeholder="4082211.543"
+                        className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-bold text-xs"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Cartesian ECEF Velocities Inputs */}
               <div className="space-y-3 bg-purple-50/60 p-4 rounded-xl border border-purple-200">
                 <div className="flex items-center justify-between">
-                  <h4 className="font-bold text-purple-950">Onaylı Kartezyen ECEF Hızları (m/yıl)</h4>
-                  <span className="text-[10px] text-purple-700 font-mono">X(t) = X_2005 + Vx*(t-2005)</span>
+                  <h4 className="font-bold text-purple-950 text-xs">Onaylı Kartezyen ECEF Hızları (m/yıl)</h4>
+                  <span className="text-[10px] text-purple-700 font-mono">X(t) = X_2005 + Vx*(t - 2005.00)</span>
                 </div>
                 <div className="grid grid-cols-3 gap-2 font-mono">
                   <div>
@@ -1274,7 +1469,7 @@ export const StationsAntennaTab: React.FC<Props> = ({
                         setTempVu(topo.vu);
                       }}
                       placeholder="0.0000"
-                      className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-bold"
+                      className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-bold text-xs"
                     />
                   </div>
                   <div>
@@ -1295,7 +1490,7 @@ export const StationsAntennaTab: React.FC<Props> = ({
                         setTempVu(topo.vu);
                       }}
                       placeholder="0.0000"
-                      className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-bold"
+                      className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-bold text-xs"
                     />
                   </div>
                   <div>
@@ -1316,7 +1511,7 @@ export const StationsAntennaTab: React.FC<Props> = ({
                         setTempVu(topo.vu);
                       }}
                       placeholder="0.0000"
-                      className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-bold"
+                      className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-bold text-xs"
                     />
                   </div>
                 </div>
@@ -1325,7 +1520,7 @@ export const StationsAntennaTab: React.FC<Props> = ({
               {/* Topocentric Velocities Inputs */}
               <div className="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
                 <div className="flex items-center justify-between">
-                  <h4 className="font-bold text-slate-800">Yerel Toposentrik Hızlar (mm/yıl)</h4>
+                  <h4 className="font-bold text-slate-800 text-xs">Yerel Toposentrik Hızlar (mm/yıl)</h4>
                   <span className="text-[10px] text-slate-500 font-mono">Ve, Vn, Vu (mm/yıl)</span>
                 </div>
                 <div className="grid grid-cols-3 gap-2 font-mono">
@@ -1347,7 +1542,7 @@ export const StationsAntennaTab: React.FC<Props> = ({
                         setTempVz(cart.vz);
                       }}
                       placeholder="0.0"
-                      className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white"
+                      className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white text-xs"
                     />
                   </div>
                   <div>
@@ -1368,7 +1563,7 @@ export const StationsAntennaTab: React.FC<Props> = ({
                         setTempVz(cart.vz);
                       }}
                       placeholder="0.0"
-                      className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white"
+                      className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white text-xs"
                     />
                   </div>
                   <div>
@@ -1389,11 +1584,68 @@ export const StationsAntennaTab: React.FC<Props> = ({
                         setTempVz(cart.vz);
                       }}
                       placeholder="0.0"
-                      className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white"
+                      className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white text-xs"
                     />
                   </div>
                 </div>
               </div>
+
+              {/* Real-time Calculation Preview Box */}
+              {(() => {
+                const dt = surveyEpoch - 2005.00;
+                const calcX = tempRefX + tempVx * dt;
+                const calcY = tempRefY + tempVy * dt;
+                const calcZ = tempRefZ + tempVz * dt;
+                const dShiftMm = Math.sqrt(
+                  Math.pow(tempVx * dt * 1000, 2) +
+                  Math.pow(tempVy * dt * 1000, 2) +
+                  Math.pow(tempVz * dt * 1000, 2)
+                );
+                const geo = ecefToGeodetic(calcX, calcY, calcZ);
+                const tm = geodeticToTM(geo.lat, geo.lon, dom);
+
+                return (
+                  <div className="p-3.5 bg-emerald-50 rounded-xl border border-emerald-200 text-xs space-y-2">
+                    <div className="flex items-center justify-between text-emerald-900 font-bold">
+                      <span className="flex items-center gap-1.5">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                        <span>Dengeleme Epoğundaki (t = {surveyEpoch.toFixed(2)}) Canlı Hesaplanan Koordinatlar:</span>
+                      </span>
+                      <span className="px-2 py-0.5 rounded bg-emerald-200/80 text-emerald-950 font-mono text-[10px]">
+                        Δt = {dt.toFixed(2)} Yıl | Toplam Kayma: {(dShiftMm / 10).toFixed(1)} cm
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 font-mono text-[11px] pt-1">
+                      <div className="bg-white p-2 rounded border border-emerald-200">
+                        <span className="text-slate-500 block text-[10px]">X(t):</span>
+                        <strong className="text-slate-900">{calcX.toFixed(4)} m</strong>
+                      </div>
+                      <div className="bg-white p-2 rounded border border-emerald-200">
+                        <span className="text-slate-500 block text-[10px]">Y(t):</span>
+                        <strong className="text-slate-900">{calcY.toFixed(4)} m</strong>
+                      </div>
+                      <div className="bg-white p-2 rounded border border-emerald-200">
+                        <span className="text-slate-500 block text-[10px]">Z(t):</span>
+                        <strong className="text-slate-900">{calcZ.toFixed(4)} m</strong>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 font-mono text-[11px]">
+                      <div className="bg-white p-2 rounded border border-emerald-200">
+                        <span className="text-slate-500 block text-[10px]">TM Sağa Y:</span>
+                        <strong className="text-sky-800">{tm.projY.toFixed(4)} m</strong>
+                      </div>
+                      <div className="bg-white p-2 rounded border border-emerald-200">
+                        <span className="text-slate-500 block text-[10px]">TM Yukarı X:</span>
+                        <strong className="text-sky-800">{tm.projX.toFixed(4)} m</strong>
+                      </div>
+                      <div className="bg-white p-2 rounded border border-emerald-200">
+                        <span className="text-slate-500 block text-[10px]">Elipsoidal Kot h:</span>
+                        <strong className="text-emerald-800">{geo.h.toFixed(4)} m</strong>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Quick Preset Buttons */}
               <div className="flex items-center justify-between gap-2 pt-1 flex-wrap">

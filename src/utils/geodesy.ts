@@ -1504,11 +1504,10 @@ export function calculateLoopClosures(
 // ============================================================================
 
 /**
- * Matrix Inversion with Partial Pivoting (Gaussian Elimination)
+ * Matrix Inversion with Partial Pivoting and Tikhonov Regularization Fallback
  */
-export function invertMatrix(A: number[][]): number[][] | null {
+function invertMatrixGaussJordan(A: number[][]): number[][] | null {
   const n = A.length;
-  // Augment with identity
   const aug: number[][] = [];
   for (let i = 0; i < n; i++) {
     aug[i] = [];
@@ -1521,7 +1520,6 @@ export function invertMatrix(A: number[][]): number[][] | null {
   }
 
   for (let i = 0; i < n; i++) {
-    // Find pivot
     let maxRow = i;
     let maxVal = Math.abs(aug[i][i]);
     for (let k = i + 1; k < n; k++) {
@@ -1532,20 +1530,17 @@ export function invertMatrix(A: number[][]): number[][] | null {
     }
     if (maxVal < 1e-15) return null; // Singular
 
-    // Swap rows
     if (maxRow !== i) {
       const temp = aug[i];
       aug[i] = aug[maxRow];
       aug[maxRow] = temp;
     }
 
-    // Normalize pivot row
     const pivot = aug[i][i];
     for (let j = i; j < 2 * n; j++) {
       aug[i][j] /= pivot;
     }
 
-    // Eliminate other rows
     for (let k = 0; k < n; k++) {
       if (k !== i) {
         const factor = aug[k][i];
@@ -1566,6 +1561,82 @@ export function invertMatrix(A: number[][]): number[][] | null {
   return inv;
 }
 
+export function invertMatrix(A: number[][]): number[][] | null {
+  const direct = invertMatrixGaussJordan(A);
+  if (direct) return direct;
+
+  // If near-singular, apply small Tikhonov ridge regularization
+  const n = A.length;
+  let trace = 0;
+  for (let i = 0; i < n; i++) trace += Math.abs(A[i][i]);
+  const lambda = (trace / (n || 1)) * 1e-9 || 1e-8;
+
+  const regA: number[][] = [];
+  for (let i = 0; i < n; i++) {
+    regA[i] = [];
+    for (let j = 0; j < n; j++) {
+      regA[i][j] = A[i][j] + (i === j ? lambda : 0);
+    }
+  }
+
+  return invertMatrixGaussJordan(regA);
+}
+
+/**
+ * Computes and shifts a station's survey epoch coordinates from 2005.00 reference epoch and official velocities:
+ * X(t) = X_2005 + Vx * (surveyEpoch - 2005.00)
+ * Y(t) = Y_2005 + Vy * (surveyEpoch - 2005.00)
+ * Z(t) = Z_2005 + Vz * (surveyEpoch - 2005.00)
+ * Then computes Bowring/GRS80 Geodetic (phi, lam, h) and Transverse Mercator (Y, X) projection coordinates.
+ */
+export function computeStationEpochCoordinates(
+  st: Station,
+  surveyEpoch: number = 2026.0,
+  domDeg: number = 30
+): Station {
+  const refEpoch = 2005.00;
+  const dt = surveyEpoch - refEpoch;
+
+  // Use refX if defined, otherwise st.x
+  const refX = typeof st.refX === 'number' && !isNaN(st.refX) && st.refX !== 0 ? st.refX : st.x;
+  const refY = typeof st.refY === 'number' && !isNaN(st.refY) && st.refY !== 0 ? st.refY : st.y;
+  const refZ = typeof st.refZ === 'number' && !isNaN(st.refZ) && st.refZ !== 0 ? st.refZ : st.z;
+
+  const vx = st.velocities?.vx || 0;
+  const vy = st.velocities?.vy || 0;
+  const vz = st.velocities?.vz || 0;
+
+  const surveyX = refX + vx * dt;
+  const surveyY = refY + vy * dt;
+  const surveyZ = refZ + vz * dt;
+
+  const refGeo = ecefToGeodetic(refX, refY, refZ);
+  const refTM = geodeticToTM(refGeo.lat, refGeo.lon, domDeg);
+
+  const surveyGeo = ecefToGeodetic(surveyX, surveyY, surveyZ);
+  const surveyTM = geodeticToTM(surveyGeo.lat, surveyGeo.lon, domDeg);
+
+  return {
+    ...st,
+    refX,
+    refY,
+    refZ,
+    refLat: refGeo.lat,
+    refLon: refGeo.lon,
+    refH: refGeo.h,
+    refProjY: refTM.projY,
+    refProjX: refTM.projX,
+    x: surveyX,
+    y: surveyY,
+    z: surveyZ,
+    lat: surveyGeo.lat,
+    lon: surveyGeo.lon,
+    h: surveyGeo.h,
+    projY: surveyTM.projY,
+    projX: surveyTM.projX,
+  };
+}
+
 /**
  * 3x3 Symmetric Matrix Inversion (Optimized for baseline covariance)
  */
@@ -1580,24 +1651,33 @@ function invert3x3(m: [
     [g, h, k],
   ] = m;
 
-  const A = e * k - f * h;
-  const B = -(d * k - f * g);
-  const C = d * h - e * g;
-  const D = -(b * k - c * h);
-  const E = a * k - c * g;
-  const F = -(a * h - b * g);
-  const G = b * f - c * e;
-  const H = -(a * f - c * d);
-  const K = a * e - b * d;
+  const safeA = isNaN(a) || a === 0 ? 1e-4 : a;
+  const safeE = isNaN(e) || e === 0 ? 1e-4 : e;
+  const safeK = isNaN(k) || k === 0 ? 1e-4 : k;
+  const safeB = isNaN(b) ? 0 : b;
+  const safeC = isNaN(c) ? 0 : c;
+  const safeD = isNaN(d) ? safeB : d;
+  const safeF = isNaN(f) ? 0 : f;
+  const safeG = isNaN(g) ? safeC : g;
+  const safeH = isNaN(h) ? safeF : h;
 
-  const det = a * A + b * B + c * C;
+  const A = safeE * safeK - safeF * safeH;
+  const B = -(safeD * safeK - safeF * safeG);
+  const C = safeD * safeH - safeE * safeG;
+  const D = -(safeB * safeK - safeC * safeH);
+  const E = safeA * safeK - safeC * safeG;
+  const F = -(safeA * safeH - safeB * safeG);
+  const G = safeB * safeF - safeC * safeE;
+  const H = -(safeA * safeF - safeC * safeD);
+  const K = safeA * safeE - safeB * safeD;
+
+  const det = safeA * A + safeB * B + safeC * C;
   if (Math.abs(det) < 1e-24) {
-    // Regularize near-singular covariance
-    const reg = 1e-6;
+    const reg = 1e-5;
     return [
-      [1 / (a + reg), 0, 0],
-      [0, 1 / (e + reg), 0],
-      [0, 0, 1 / (k + reg)],
+      [1 / (safeA + reg), 0, 0],
+      [0, 1 / (safeE + reg), 0],
+      [0, 0, 1 / (safeK + reg)],
     ];
   }
 
@@ -1623,451 +1703,475 @@ export function perform3DNetworkAdjustment(
   mode: 'unconstrained' | 'constrained' = 'constrained',
   config: JobConfig
 ): AdjustmentResult | null {
-  const stationKeys = Object.keys(inputStations);
-  if (stationKeys.length < 2) return null;
+  try {
+    const stationKeys = Object.keys(inputStations);
+    if (stationKeys.length < 2) return null;
 
-  const activeBaselines = inputBaselines.filter((b) => !b.excluded);
-  if (activeBaselines.length < 1) return null;
-
-  // Determine fixed and unknown stations
-  const fixedStationIds: string[] = [];
-  const unknownStationIds: string[] = [];
-
-  if (mode === 'unconstrained') {
-    // In free network mode: pick the primary CORS station as sole fixed datum
-    const corsStn = stationKeys.find((id) => inputStations[id].type === 'CORS') || stationKeys[0];
-    fixedStationIds.push(corsStn);
-    for (const id of stationKeys) {
-      if (id !== corsStn) unknownStationIds.push(id);
+    // Prune baselines: only keep those where both endpoints exist in inputStations
+    let activeBaselines = inputBaselines.filter(
+      (b) => !b.excluded && b.fromId in inputStations && b.toId in inputStations
+    );
+    if (activeBaselines.length === 0) {
+      activeBaselines = generateBaselinesFromStations(inputStations);
     }
-  } else {
-    // In constrained mode: fixed stations are those marked as isFixed.x, y, z
+    if (activeBaselines.length < 1) return null;
+
+    // Determine fixed and unknown stations
+    const fixedStationIds: string[] = [];
+    const unknownStationIds: string[] = [];
+
+    if (mode === 'unconstrained') {
+      // In free network mode: pick the primary CORS station (or first station) as sole fixed datum
+      const corsStn = stationKeys.find((id) => inputStations[id].type === 'CORS' || inputStations[id].isFixed.x) || stationKeys[0];
+      fixedStationIds.push(corsStn);
+      for (const id of stationKeys) {
+        if (id !== corsStn) unknownStationIds.push(id);
+      }
+    } else {
+      // In constrained mode: fixed stations are those marked as isFixed.x, y, z or CORS
+      for (const id of stationKeys) {
+        const st = inputStations[id];
+        if ((st.isFixed.x && st.isFixed.y && st.isFixed.z) || st.type === 'CORS') {
+          fixedStationIds.push(id);
+        } else {
+          unknownStationIds.push(id);
+        }
+      }
+
+      // Guard: If all stations were marked fixed, treat non-first stations as unknowns so adjustment can proceed
+      if (unknownStationIds.length === 0) {
+        const primary = fixedStationIds[0] || stationKeys[0];
+        fixedStationIds.length = 0;
+        fixedStationIds.push(primary);
+        for (const id of stationKeys) {
+          if (id !== primary) unknownStationIds.push(id);
+        }
+      }
+
+      // If no stations are fixed in constrained mode, fix the first CORS or first point
+      if (fixedStationIds.length === 0) {
+        const fallback = stationKeys.find((id) => inputStations[id].type === 'CORS') || stationKeys[0];
+        fixedStationIds.push(fallback);
+        const idx = unknownStationIds.indexOf(fallback);
+        if (idx !== -1) unknownStationIds.splice(idx, 1);
+      }
+    }
+
+    const uCount = unknownStationIds.length;
+    if (uCount === 0) return null;
+
+    // Total unknowns = 3 * uCount (dX, dY, dZ for each unknown station)
+    const numUnknowns = 3 * uCount;
+    // Total observations = 3 * m (dX, dY, dZ for each baseline)
+    const numObs = 3 * activeBaselines.length;
+
+    const dof = numObs - numUnknowns;
+    const effectiveDof = Math.max(1, dof);
+
+    // Map station ID to unknown index: 0, 1, ..., uCount-1
+    const unknownIndexMap: Record<string, number> = {};
+    for (let i = 0; i < uCount; i++) {
+      unknownIndexMap[unknownStationIds[i]] = i;
+    }
+
+    // Current station coordinates (at survey epoch)
+    const dt = (config.surveyEpoch || 2026.0) - (config.refEpoch || 2005.00);
+    const currentCoords: Record<string, { x: number; y: number; z: number }> = {};
     for (const id of stationKeys) {
       const st = inputStations[id];
-      if (st.isFixed.x && st.isFixed.y && st.isFixed.z) {
-        fixedStationIds.push(id);
-      } else {
-        unknownStationIds.push(id);
+      const refX = typeof st.refX === 'number' && !isNaN(st.refX) && st.refX !== 0 ? st.refX : st.x;
+      const refY = typeof st.refY === 'number' && !isNaN(st.refY) && st.refY !== 0 ? st.refY : st.y;
+      const refZ = typeof st.refZ === 'number' && !isNaN(st.refZ) && st.refZ !== 0 ? st.refZ : st.z;
+
+      const vx = st.velocities?.vx || 0;
+      const vy = st.velocities?.vy || 0;
+      const vz = st.velocities?.vz || 0;
+
+      currentCoords[id] = {
+        x: refX + vx * dt,
+        y: refY + vy * dt,
+        z: refZ + vz * dt,
+      };
+    }
+
+    let iterations = 0;
+    let maxDisplacementMm = 0;
+    let normalInv: number[][] | null = null;
+    let finalResiduals: number[] = [];
+    let finalBaselines: BaselineVector[] = [];
+    let vPv = 0;
+
+    // Design matrix A (numObs x numUnknowns) and misclosure vector l (numObs)
+    const A: number[][] = Array.from({ length: numObs }, () => Array(numUnknowns).fill(0));
+    const l: number[] = Array(numObs).fill(0);
+    const P_blocks: Array<[[number, number, number], [number, number, number], [number, number, number]]> = [];
+
+    // Invert 3x3 covariance matrix for each baseline to build weight block P_k
+    for (let k = 0; k < activeBaselines.length; k++) {
+      const b = activeBaselines[k];
+      const qxx = b.qxx && !isNaN(b.qxx) ? b.qxx : 1e-5;
+      const qyy = b.qyy && !isNaN(b.qyy) ? b.qyy : 1e-5;
+      const qzz = b.qzz && !isNaN(b.qzz) ? b.qzz : 1e-5;
+      const qxy = b.qxy && !isNaN(b.qxy) ? b.qxy : 0;
+      const qyz = b.qyz && !isNaN(b.qyz) ? b.qyz : 0;
+      const qzx = b.qzx && !isNaN(b.qzx) ? b.qzx : 0;
+
+      const cov: [[number, number, number], [number, number, number], [number, number, number]] = [
+        [qxx, qxy, qzx],
+        [qxy, qyy, qyz],
+        [qzx, qyz, qzz],
+      ];
+      P_blocks.push(invert3x3(cov));
+    }
+
+    // Iterative Gauss-Markov solver
+    for (let iter = 0; iter < 4; iter++) {
+      iterations++;
+
+      // Clear A and l
+      for (let r = 0; r < numObs; r++) {
+        l[r] = 0;
+        for (let c = 0; c < numUnknowns; c++) {
+          A[r][c] = 0;
+        }
       }
-    }
-    // If no stations are fixed in constrained mode, fix the first CORS or first point
-    if (fixedStationIds.length === 0) {
-      const fallback = stationKeys.find((id) => inputStations[id].type === 'CORS') || stationKeys[0];
-      fixedStationIds.push(fallback);
-      const idx = unknownStationIds.indexOf(fallback);
-      if (idx !== -1) unknownStationIds.splice(idx, 1);
-    }
-  }
 
-  const uCount = unknownStationIds.length;
-  if (uCount === 0) {
-    // Edge case: all fixed, nothing to adjust
-    return null;
-  }
+      // Populate A and l: l = b_obs - (X_to - X_from)
+      for (let k = 0; k < activeBaselines.length; k++) {
+        const b = activeBaselines[k];
+        const rowStart = 3 * k;
 
-  // Total unknowns = 3 * uCount (dX, dY, dZ for each unknown station)
-  const numUnknowns = 3 * uCount;
-  // Total observations = 3 * m (dX, dY, dZ for each baseline)
-  const numObs = 3 * activeBaselines.length;
+        const fromCoord = currentCoords[b.fromId];
+        const toCoord = currentCoords[b.toId];
+        if (!fromCoord || !toCoord) continue;
 
-  const dof = numObs - numUnknowns;
-  if (dof < 0) {
-    // Underdetermined network
-    return null;
-  }
+        const computedDX = toCoord.x - fromCoord.x;
+        const computedDY = toCoord.y - fromCoord.y;
+        const computedDZ = toCoord.z - fromCoord.z;
 
-  // Map station ID to unknown index: 0, 1, ..., uCount-1
-  const unknownIndexMap: Record<string, number> = {};
-  for (let i = 0; i < uCount; i++) {
-    unknownIndexMap[unknownStationIds[i]] = i;
-  }
+        l[rowStart] = b.dX - computedDX;
+        l[rowStart + 1] = b.dY - computedDY;
+        l[rowStart + 2] = b.dZ - computedDZ;
 
-  // Current station coordinates
-  const currentCoords: Record<string, { x: number; y: number; z: number }> = {};
-  for (const id of stationKeys) {
-    currentCoords[id] = {
-      x: inputStations[id].x,
-      y: inputStations[id].y,
-      z: inputStations[id].z,
-    };
-  }
+        // Derivatives w.r.t unknown station coordinates
+        if (b.fromId in unknownIndexMap) {
+          const uIdx = unknownIndexMap[b.fromId];
+          const colStart = 3 * uIdx;
+          A[rowStart][colStart] = -1.0;
+          A[rowStart + 1][colStart + 1] = -1.0;
+          A[rowStart + 2][colStart + 2] = -1.0;
+        }
 
-  let iterations = 0;
-  let maxDisplacementMm = 0;
-  let normalInv: number[][] | null = null;
-  let finalResiduals: number[] = [];
-  let finalBaselines: BaselineVector[] = [];
-  let vPv = 0;
-
-  // Design matrix A (numObs x numUnknowns) and misclosure vector l (numObs)
-  const A: number[][] = Array.from({ length: numObs }, () => Array(numUnknowns).fill(0));
-  const l: number[] = Array(numObs).fill(0);
-  const P_blocks: Array<[[number, number, number], [number, number, number], [number, number, number]]> = [];
-
-  // Invert 3x3 covariance matrix for each baseline to build weight block P_k
-  for (let k = 0; k < activeBaselines.length; k++) {
-    const b = activeBaselines[k];
-    const cov: [[number, number, number], [number, number, number], [number, number, number]] = [
-      [b.qxx, b.qxy, b.qzx],
-      [b.qxy, b.qyy, b.qyz],
-      [b.qzx, b.qyz, b.qzz],
-    ];
-    P_blocks.push(invert3x3(cov));
-  }
-
-  // Iterative Gauss-Markov solver
-  for (let iter = 0; iter < 3; iter++) {
-    iterations++;
-
-    // Clear A and l
-    for (let r = 0; r < numObs; r++) {
-      l[r] = 0;
-      for (let c = 0; c < numUnknowns; c++) {
-        A[r][c] = 0;
+        if (b.toId in unknownIndexMap) {
+          const uIdx = unknownIndexMap[b.toId];
+          const colStart = 3 * uIdx;
+          A[rowStart][colStart] = 1.0;
+          A[rowStart + 1][colStart + 1] = 1.0;
+          A[rowStart + 2][colStart + 2] = 1.0;
+        }
       }
+
+      // Compute N = A^T * P * A and u = A^T * P * l
+      const N: number[][] = Array.from({ length: numUnknowns }, () => Array(numUnknowns).fill(0));
+      const uVec: number[] = Array(numUnknowns).fill(0);
+
+      for (let k = 0; k < activeBaselines.length; k++) {
+        const rowStart = 3 * k;
+        const P_k = P_blocks[k];
+
+        // Pl_k = P_k * l_k
+        const l_k = [l[rowStart], l[rowStart + 1], l[rowStart + 2]];
+        const Pl_k = [
+          P_k[0][0] * l_k[0] + P_k[0][1] * l_k[1] + P_k[0][2] * l_k[2],
+          P_k[1][0] * l_k[0] + P_k[1][1] * l_k[1] + P_k[1][2] * l_k[2],
+          P_k[2][0] * l_k[0] + P_k[2][1] * l_k[1] + P_k[2][2] * l_k[2],
+        ];
+
+        // A_k (3 x numUnknowns)
+        for (let c = 0; c < numUnknowns; c++) {
+          const A_kc0 = A[rowStart][c];
+          const A_kc1 = A[rowStart + 1][c];
+          const A_kc2 = A[rowStart + 2][c];
+          if (A_kc0 === 0 && A_kc1 === 0 && A_kc2 === 0) continue;
+
+          uVec[c] += A_kc0 * Pl_k[0] + A_kc1 * Pl_k[1] + A_kc2 * Pl_k[2];
+
+          // PA_k = P_k * A_k_col
+          const PA0 = P_k[0][0] * A_kc0 + P_k[0][1] * A_kc1 + P_k[0][2] * A_kc2;
+          const PA1 = P_k[1][0] * A_kc0 + P_k[1][1] * A_kc1 + P_k[1][2] * A_kc2;
+          const PA2 = P_k[2][0] * A_kc0 + P_k[2][1] * A_kc1 + P_k[2][2] * A_kc2;
+
+          for (let c2 = 0; c2 < numUnknowns; c2++) {
+            const A_k20 = A[rowStart][c2];
+            const A_k21 = A[rowStart + 1][c2];
+            const A_k22 = A[rowStart + 2][c2];
+            if (A_k20 === 0 && A_k21 === 0 && A_k22 === 0) continue;
+
+            N[c2][c] += A_k20 * PA0 + A_k21 * PA1 + A_k22 * PA2;
+          }
+        }
+      }
+
+      normalInv = invertMatrix(N);
+      if (!normalInv) return null;
+
+      // Parameter corrections dx_hat = N^-1 * u
+      const dx_hat: number[] = Array(numUnknowns).fill(0);
+      for (let r = 0; r < numUnknowns; r++) {
+        for (let c = 0; c < numUnknowns; c++) {
+          dx_hat[r] += normalInv[r][c] * uVec[c];
+        }
+      }
+
+      // Apply updates to coordinates
+      let stepMaxMm = 0;
+      for (let i = 0; i < uCount; i++) {
+        const stId = unknownStationIds[i];
+        const colStart = 3 * i;
+        const dX = dx_hat[colStart];
+        const dY = dx_hat[colStart + 1];
+        const dZ = dx_hat[colStart + 2];
+
+        currentCoords[stId].x += dX;
+        currentCoords[stId].y += dY;
+        currentCoords[stId].z += dZ;
+
+        const dispMm = Math.sqrt(dX * dX + dY * dY + dZ * dZ) * 1000.0;
+        if (dispMm > stepMaxMm) stepMaxMm = dispMm;
+      }
+
+      maxDisplacementMm = stepMaxMm;
+      if (stepMaxMm < 0.05) break; // Converged
     }
 
-    // Populate A and l: l = b_obs - (X_to - X_from)
+    // Calculate final residuals v = A * x_hat - l
+    finalResiduals = Array(numObs).fill(0);
+    vPv = 0;
+
     for (let k = 0; k < activeBaselines.length; k++) {
       const b = activeBaselines[k];
       const rowStart = 3 * k;
 
       const fromCoord = currentCoords[b.fromId];
       const toCoord = currentCoords[b.toId];
+      if (!fromCoord || !toCoord) continue;
 
-      const computedDX = toCoord.x - fromCoord.x;
-      const computedDY = toCoord.y - fromCoord.y;
-      const computedDZ = toCoord.z - fromCoord.z;
+      const vX = toCoord.x - fromCoord.x - b.dX;
+      const vY = toCoord.y - fromCoord.y - b.dY;
+      const vZ = toCoord.z - fromCoord.z - b.dZ;
 
-      l[rowStart] = b.dX - computedDX;
-      l[rowStart + 1] = b.dY - computedDY;
-      l[rowStart + 2] = b.dZ - computedDZ;
+      finalResiduals[rowStart] = vX;
+      finalResiduals[rowStart + 1] = vY;
+      finalResiduals[rowStart + 2] = vZ;
 
-      // Derivatives w.r.t unknown station coordinates
-      if (b.fromId in unknownIndexMap) {
-        const uIdx = unknownIndexMap[b.fromId];
-        const colStart = 3 * uIdx;
-        A[rowStart][colStart] = -1.0;
-        A[rowStart + 1][colStart + 1] = -1.0;
-        A[rowStart + 2][colStart + 2] = -1.0;
-      }
+      const P_k = P_blocks[k];
+      const v_k = [vX, vY, vZ];
+      const Pv_k = [
+        P_k[0][0] * v_k[0] + P_k[0][1] * v_k[1] + P_k[0][2] * v_k[2],
+        P_k[1][0] * v_k[0] + P_k[1][1] * v_k[1] + P_k[1][2] * v_k[2],
+        P_k[2][0] * v_k[0] + P_k[2][1] * v_k[1] + P_k[2][2] * v_k[2],
+      ];
 
-      if (b.toId in unknownIndexMap) {
-        const uIdx = unknownIndexMap[b.toId];
-        const colStart = 3 * uIdx;
-        A[rowStart][colStart] = 1.0;
-        A[rowStart + 1][colStart + 1] = 1.0;
-        A[rowStart + 2][colStart + 2] = 1.0;
-      }
+      vPv += v_k[0] * Pv_k[0] + v_k[1] * Pv_k[1] + v_k[2] * Pv_k[2];
     }
 
-    // Compute N = A^T * P * A and u = A^T * P * l
-    // Since P is block diagonal (3x3 blocks per baseline), we compute efficiently
-    const N: number[][] = Array.from({ length: numUnknowns }, () => Array(numUnknowns).fill(0));
-    const uVec: number[] = Array(numUnknowns).fill(0);
+    const sigma0Aposteriori = Math.sqrt(Math.max(1e-12, vPv / effectiveDof));
+    const sigma0Sq = sigma0Aposteriori * sigma0Aposteriori;
+
+    // Global Model Chi-Square Test (at 95% confidence)
+    const chiLower = Math.max(0.01, effectiveDof * Math.pow(1 - 2 / (9 * effectiveDof) - 1.96 * Math.sqrt(2 / (9 * effectiveDof)), 3));
+    const chiUpper = effectiveDof * Math.pow(1 - 2 / (9 * effectiveDof) + 1.96 * Math.sqrt(2 / (9 * effectiveDof)), 3);
+    const chiPassed = vPv >= chiLower && vPv <= chiUpper;
+
+    // Baarda Data Snooping (w-test) outlier detection
+    const outliers: string[] = [];
+    finalBaselines = [];
 
     for (let k = 0; k < activeBaselines.length; k++) {
+      const b = activeBaselines[k];
       const rowStart = 3 * k;
-      const P_k = P_blocks[k];
+      const vX = finalResiduals[rowStart];
+      const vY = finalResiduals[rowStart + 1];
+      const vZ = finalResiduals[rowStart + 2];
 
-      // Pl_k = P_k * l_k
-      const l_k = [l[rowStart], l[rowStart + 1], l[rowStart + 2]];
-      const Pl_k = [
-        P_k[0][0] * l_k[0] + P_k[0][1] * l_k[1] + P_k[0][2] * l_k[2],
-        P_k[1][0] * l_k[0] + P_k[1][1] * l_k[1] + P_k[1][2] * l_k[2],
-        P_k[2][0] * l_k[0] + P_k[2][1] * l_k[1] + P_k[2][2] * l_k[2],
-      ];
+      const vX_mm = vX * 1000.0;
+      const vY_mm = vY * 1000.0;
+      const vZ_mm = vZ * 1000.0;
+      const spatialV_mm = Math.sqrt(vX_mm * vX_mm + vY_mm * vY_mm + vZ_mm * vZ_mm);
 
-      // A_k (3 x numUnknowns)
-      for (let c = 0; c < numUnknowns; c++) {
-        const A_kc0 = A[rowStart][c];
-        const A_kc1 = A[rowStart + 1][c];
-        const A_kc2 = A[rowStart + 2][c];
-        if (A_kc0 === 0 && A_kc1 === 0 && A_kc2 === 0) continue;
+      const var_vX = Math.max(1e-10, (b.qxx || 1e-5) * (Math.max(1, dof) / numObs));
+      const var_vY = Math.max(1e-10, (b.qyy || 1e-5) * (Math.max(1, dof) / numObs));
+      const var_vZ = Math.max(1e-10, (b.qzz || 1e-5) * (Math.max(1, dof) / numObs));
 
-        uVec[c] += A_kc0 * Pl_k[0] + A_kc1 * Pl_k[1] + A_kc2 * Pl_k[2];
+      const wX = Math.abs(vX) / (sigma0Aposteriori * Math.sqrt(var_vX));
+      const wY = Math.abs(vY) / (sigma0Aposteriori * Math.sqrt(var_vY));
+      const wZ = Math.abs(vZ) / (sigma0Aposteriori * Math.sqrt(var_vZ));
+      const maxW = Math.max(wX, wY, wZ);
 
-        // PA_k = P_k * A_k_col
-        const PA0 = P_k[0][0] * A_kc0 + P_k[0][1] * A_kc1 + P_k[0][2] * A_kc2;
-        const PA1 = P_k[1][0] * A_kc0 + P_k[1][1] * A_kc1 + P_k[1][2] * A_kc2;
-        const PA2 = P_k[2][0] * A_kc0 + P_k[2][1] * A_kc1 + P_k[2][2] * A_kc2;
+      const isOutlier = maxW > config.wCrit;
+      if (isOutlier) {
+        outliers.push(b.id);
+      }
 
-        for (let c2 = 0; c2 < numUnknowns; c2++) {
-          const A_k20 = A[rowStart][c2];
-          const A_k21 = A[rowStart + 1][c2];
-          const A_k22 = A[rowStart + 2][c2];
-          if (A_k20 === 0 && A_k21 === 0 && A_k22 === 0) continue;
+      finalBaselines.push({
+        ...b,
+        vX: vX_mm,
+        vY: vY_mm,
+        vZ: vZ_mm,
+        spatialV: spatialV_mm,
+        wTest: maxW,
+        isOutlier,
+      });
+    }
 
-          N[c2][c] += A_k20 * PA0 + A_k21 * PA1 + A_k22 * PA2;
+    // Parameter Covariance Matrix Sigma_xx = sigma0^2 * N^-1
+    const adjustedStations: Record<string, Station> = {};
+
+    for (const id of stationKeys) {
+      const origSt = inputStations[id];
+      const adjCoord = currentCoords[id];
+
+      // Compute updated Geodetic and TM coordinates using Bowring and Gauss-Krüger
+      const geo = ecefToGeodetic(adjCoord.x, adjCoord.y, adjCoord.z);
+      const tm = geodeticToTM(geo.lat, geo.lon, config.dom);
+
+      if (id in unknownIndexMap && normalInv) {
+        const uIdx = unknownIndexMap[id];
+        const colStart = 3 * uIdx;
+
+        // Variance in ECEF X, Y, Z (m^2)
+        const varX = sigma0Sq * normalInv[colStart][colStart];
+        const varY = sigma0Sq * normalInv[colStart + 1][colStart + 1];
+        const varZ = sigma0Sq * normalInv[colStart + 2][colStart + 2];
+        const covXY = sigma0Sq * normalInv[colStart][colStart + 1];
+        const covYZ = sigma0Sq * normalInv[colStart + 1][colStart + 2];
+        const covZX = sigma0Sq * normalInv[colStart + 2][colStart];
+
+        const sigmaX_mm = Math.sqrt(Math.max(1e-12, Math.abs(varX))) * 1000.0;
+        const sigmaY_mm = Math.sqrt(Math.max(1e-12, Math.abs(varY))) * 1000.0;
+        const sigmaZ_mm = Math.sqrt(Math.max(1e-12, Math.abs(varZ))) * 1000.0;
+
+        // Transform ECEF covariance submatrix to Local Topocentric ENU
+        const phi = degToRad(geo.lat);
+        const lam = degToRad(geo.lon);
+        const sPhi = Math.sin(phi);
+        const cPhi = Math.cos(phi);
+        const sLam = Math.sin(lam);
+        const cLam = Math.cos(lam);
+
+        const R = [
+          [-sLam, cLam, 0],
+          [-sPhi * cLam, -sPhi * sLam, cPhi],
+          [cPhi * cLam, cPhi * sLam, sPhi],
+        ];
+
+        const covXYZ = [
+          [varX, covXY, covZX],
+          [covXY, varY, covYZ],
+          [covZX, covYZ, varZ],
+        ];
+
+        // R * covXYZ * R^T
+        const temp: number[][] = Array.from({ length: 3 }, () => Array(3).fill(0));
+        for (let r = 0; r < 3; r++) {
+          for (let c = 0; c < 3; c++) {
+            temp[r][c] = R[r][0] * covXYZ[0][c] + R[r][1] * covXYZ[1][c] + R[r][2] * covXYZ[2][c];
+          }
         }
-      }
-    }
 
-    normalInv = invertMatrix(N);
-    if (!normalInv) return null; // Ill-conditioned network
-
-    // Parameter corrections dx_hat = N^-1 * u
-    const dx_hat: number[] = Array(numUnknowns).fill(0);
-    for (let r = 0; r < numUnknowns; r++) {
-      for (let c = 0; c < numUnknowns; c++) {
-        dx_hat[r] += normalInv[r][c] * uVec[c];
-      }
-    }
-
-    // Apply updates to coordinates
-    let stepMaxMm = 0;
-    for (let i = 0; i < uCount; i++) {
-      const stId = unknownStationIds[i];
-      const colStart = 3 * i;
-      const dX = dx_hat[colStart];
-      const dY = dx_hat[colStart + 1];
-      const dZ = dx_hat[colStart + 2];
-
-      currentCoords[stId].x += dX;
-      currentCoords[stId].y += dY;
-      currentCoords[stId].z += dZ;
-
-      const dispMm = Math.sqrt(dX * dX + dY * dY + dZ * dZ) * 1000.0;
-      if (dispMm > stepMaxMm) stepMaxMm = dispMm;
-    }
-
-    maxDisplacementMm = stepMaxMm;
-    if (stepMaxMm < 0.1) break; // Converged
-  }
-
-  // Calculate final residuals v = A * x_hat - l (or v = (X_to - X_from) - b_obs)
-  finalResiduals = Array(numObs).fill(0);
-  vPv = 0;
-
-  for (let k = 0; k < activeBaselines.length; k++) {
-    const b = activeBaselines[k];
-    const rowStart = 3 * k;
-
-    const fromCoord = currentCoords[b.fromId];
-    const toCoord = currentCoords[b.toId];
-
-    const vX = toCoord.x - fromCoord.x - b.dX;
-    const vY = toCoord.y - fromCoord.y - b.dY;
-    const vZ = toCoord.z - fromCoord.z - b.dZ;
-
-    finalResiduals[rowStart] = vX;
-    finalResiduals[rowStart + 1] = vY;
-    finalResiduals[rowStart + 2] = vZ;
-
-    const P_k = P_blocks[k];
-    const v_k = [vX, vY, vZ];
-    const Pv_k = [
-      P_k[0][0] * v_k[0] + P_k[0][1] * v_k[1] + P_k[0][2] * v_k[2],
-      P_k[1][0] * v_k[0] + P_k[1][1] * v_k[1] + P_k[1][2] * v_k[2],
-      P_k[2][0] * v_k[0] + P_k[2][1] * v_k[1] + P_k[2][2] * v_k[2],
-    ];
-
-    vPv += v_k[0] * Pv_k[0] + v_k[1] * Pv_k[1] + v_k[2] * Pv_k[2];
-  }
-
-  const effectiveDof = Math.max(1, dof);
-  const sigma0Aposteriori = Math.sqrt(Math.max(1e-12, vPv / effectiveDof));
-  const sigma0Sq = sigma0Aposteriori * sigma0Aposteriori;
-
-  // Global Model Chi-Square Test (at 95% confidence)
-  // Chi-Square approximation bounds for df
-  const chiLower = Math.max(0.01, effectiveDof * Math.pow(1 - 2 / (9 * effectiveDof) - 1.96 * Math.sqrt(2 / (9 * effectiveDof)), 3));
-  const chiUpper = effectiveDof * Math.pow(1 - 2 / (9 * effectiveDof) + 1.96 * Math.sqrt(2 / (9 * effectiveDof)), 3);
-  const chiPassed = vPv >= chiLower && vPv <= chiUpper;
-
-  // Baarda Data Snooping (w-test) outlier detection
-  // Q_vv = P^-1 - A * N^-1 * A^T
-  // For each baseline, w_test = |v_i| / (sigma_0 * sqrt(q_vv_ii))
-  const outliers: string[] = [];
-  finalBaselines = [];
-
-  for (let k = 0; k < activeBaselines.length; k++) {
-    const b = activeBaselines[k];
-    const rowStart = 3 * k;
-    const vX = finalResiduals[rowStart];
-    const vY = finalResiduals[rowStart + 1];
-    const vZ = finalResiduals[rowStart + 2];
-
-    const vX_mm = vX * 1000.0;
-    const vY_mm = vY * 1000.0;
-    const vZ_mm = vZ * 1000.0;
-    const spatialV_mm = Math.sqrt(vX_mm * vX_mm + vY_mm * vY_mm + vZ_mm * vZ_mm);
-
-    // Approximate diagonal element of Q_vv
-    // Covariance of observation b is Q_ll = [qxx, qyy, qzz]
-    const var_vX = Math.max(1e-10, b.qxx * (dof / numObs));
-    const var_vY = Math.max(1e-10, b.qyy * (dof / numObs));
-    const var_vZ = Math.max(1e-10, b.qzz * (dof / numObs));
-
-    const wX = Math.abs(vX) / (sigma0Aposteriori * Math.sqrt(var_vX));
-    const wY = Math.abs(vY) / (sigma0Aposteriori * Math.sqrt(var_vY));
-    const wZ = Math.abs(vZ) / (sigma0Aposteriori * Math.sqrt(var_vZ));
-    const maxW = Math.max(wX, wY, wZ);
-
-    const isOutlier = maxW > config.wCrit;
-    if (isOutlier) {
-      outliers.push(b.id);
-    }
-
-    finalBaselines.push({
-      ...b,
-      vX: vX_mm,
-      vY: vY_mm,
-      vZ: vZ_mm,
-      spatialV: spatialV_mm,
-      wTest: maxW,
-      isOutlier,
-    });
-  }
-
-  // Parameter Covariance Matrix Sigma_xx = sigma0^2 * N^-1
-  // Calculate Standard Deviations and 2D/3D Error Ellipses for each station
-  const adjustedStations: Record<string, Station> = {};
-
-  for (const id of stationKeys) {
-    const origSt = inputStations[id];
-    const adjCoord = currentCoords[id];
-
-    // Compute updated Geodetic and TM coordinates
-    const geo = ecefToGeodetic(adjCoord.x, adjCoord.y, adjCoord.z);
-    const tm = geodeticToTM(geo.lat, geo.lon, config.dom);
-
-    if (id in unknownIndexMap && normalInv) {
-      const uIdx = unknownIndexMap[id];
-      const colStart = 3 * uIdx;
-
-      // Variance in ECEF X, Y, Z (m^2)
-      const varX = sigma0Sq * normalInv[colStart][colStart];
-      const varY = sigma0Sq * normalInv[colStart + 1][colStart + 1];
-      const varZ = sigma0Sq * normalInv[colStart + 2][colStart + 2];
-      const covXY = sigma0Sq * normalInv[colStart][colStart + 1];
-      const covYZ = sigma0Sq * normalInv[colStart + 1][colStart + 2];
-      const covZX = sigma0Sq * normalInv[colStart + 2][colStart];
-
-      const sigmaX_mm = Math.sqrt(Math.max(1e-12, varX)) * 1000.0;
-      const sigmaY_mm = Math.sqrt(Math.max(1e-12, varY)) * 1000.0;
-      const sigmaZ_mm = Math.sqrt(Math.max(1e-12, varZ)) * 1000.0;
-
-      // Transform ECEF covariance submatrix to Local Topocentric ENU
-      // R_enu = [ [-sinLam, cosLam, 0],
-      //           [-sinPhi*cosLam, -sinPhi*sinLam, cosPhi],
-      //           [cosPhi*cosLam, cosPhi*sinLam, sinPhi] ]
-      const phi = degToRad(geo.lat);
-      const lam = degToRad(geo.lon);
-      const sPhi = Math.sin(phi);
-      const cPhi = Math.cos(phi);
-      const sLam = Math.sin(lam);
-      const cLam = Math.cos(lam);
-
-      const R = [
-        [-sLam, cLam, 0],
-        [-sPhi * cLam, -sPhi * sLam, cPhi],
-        [cPhi * cLam, cPhi * sLam, sPhi],
-      ];
-
-      const covXYZ = [
-        [varX, covXY, covZX],
-        [covXY, varY, covYZ],
-        [covZX, covYZ, varZ],
-      ];
-
-      // R * covXYZ * R^T
-      const temp: number[][] = Array.from({ length: 3 }, () => Array(3).fill(0));
-      for (let r = 0; r < 3; r++) {
-        for (let c = 0; c < 3; c++) {
-          temp[r][c] = R[r][0] * covXYZ[0][c] + R[r][1] * covXYZ[1][c] + R[r][2] * covXYZ[2][c];
+        const covENU: number[][] = Array.from({ length: 3 }, () => Array(3).fill(0));
+        for (let r = 0; r < 3; r++) {
+          for (let c = 0; c < 3; c++) {
+            covENU[r][c] = temp[r][0] * R[c][0] + temp[r][1] * R[c][1] + temp[r][2] * R[c][2];
+          }
         }
+
+        const varE = Math.max(1e-12, covENU[0][0]);
+        const varN = Math.max(1e-12, covENU[1][1]);
+        const covEN = covENU[0][1];
+        const varU = Math.max(1e-12, covENU[2][2]);
+
+        // Horizontal Error Ellipse at 95% confidence level (factor c = 2.4477)
+        const diffEN = varN - varE;
+        const rootTerm = Math.sqrt(diffEN * diffEN + 4.0 * covEN * covEN);
+        const semiMajorM = Math.sqrt(Math.max(1e-12, (varN + varE + rootTerm) / 2.0)) * 2.4477;
+        const semiMinorM = Math.sqrt(Math.max(1e-12, (varN + varE - rootTerm) / 2.0)) * 2.4477;
+
+        let thetaRad = 0.5 * Math.atan2(2.0 * covEN, diffEN);
+        if (thetaRad < 0) thetaRad += Math.PI;
+        const ellipseAzimuthGon = degToGon(radToDeg(thetaRad));
+
+        const sigmaH_mm = Math.sqrt(varU) * 1.96 * 1000.0;
+
+        adjustedStations[id] = {
+          ...origSt,
+          adjustedX: adjCoord.x,
+          adjustedY: adjCoord.y,
+          adjustedZ: adjCoord.z,
+          adjustedLat: geo.lat,
+          adjustedLon: geo.lon,
+          adjustedH: geo.h,
+          adjustedProjY: tm.projY,
+          adjustedProjX: tm.projX,
+          sigmaX: sigmaX_mm,
+          sigmaY: sigmaY_mm,
+          sigmaZ: sigmaZ_mm,
+          semiMajor: semiMajorM * 1000.0,
+          semiMinor: semiMinorM * 1000.0,
+          ellipseAzimuth: ellipseAzimuthGon,
+          sigmaH: sigmaH_mm,
+        };
+      } else {
+        // Fixed datum station (zero adjustment dispersion)
+        adjustedStations[id] = {
+          ...origSt,
+          adjustedX: adjCoord.x,
+          adjustedY: adjCoord.y,
+          adjustedZ: adjCoord.z,
+          adjustedLat: geo.lat,
+          adjustedLon: geo.lon,
+          adjustedH: geo.h,
+          adjustedProjY: tm.projY,
+          adjustedProjX: tm.projX,
+          sigmaX: 0.0,
+          sigmaY: 0.0,
+          sigmaZ: 0.0,
+          semiMajor: 0.0,
+          semiMinor: 0.0,
+          ellipseAzimuth: 0.0,
+          sigmaH: 0.0,
+        };
       }
-
-      const covENU: number[][] = Array.from({ length: 3 }, () => Array(3).fill(0));
-      for (let r = 0; r < 3; r++) {
-        for (let c = 0; c < 3; c++) {
-          covENU[r][c] = temp[r][0] * R[c][0] + temp[r][1] * R[c][1] + temp[r][2] * R[c][2];
-        }
-      }
-
-      const varE = covENU[0][0]; // East variance
-      const varN = covENU[1][1]; // North variance
-      const covEN = covENU[0][1]; // East-North covariance
-      const varU = covENU[2][2]; // Up variance
-
-      // Horizontal Error Ellipse at 95% confidence level (expansion factor c = 2.4477)
-      const diffEN = varN - varE;
-      const rootTerm = Math.sqrt(diffEN * diffEN + 4.0 * covEN * covEN);
-      const semiMajorM = Math.sqrt(Math.max(1e-12, (varN + varE + rootTerm) / 2.0)) * 2.4477;
-      const semiMinorM = Math.sqrt(Math.max(1e-12, (varN + varE - rootTerm) / 2.0)) * 2.4477;
-
-      let thetaRad = 0.5 * Math.atan2(2.0 * covEN, diffEN);
-      if (thetaRad < 0) thetaRad += Math.PI;
-      const ellipseAzimuthGon = degToGon(radToDeg(thetaRad));
-
-      const sigmaH_mm = Math.sqrt(Math.max(1e-12, varU)) * 1.96 * 1000.0;
-
-      adjustedStations[id] = {
-        ...origSt,
-        adjustedX: adjCoord.x,
-        adjustedY: adjCoord.y,
-        adjustedZ: adjCoord.z,
-        adjustedLat: geo.lat,
-        adjustedLon: geo.lon,
-        adjustedH: geo.h,
-        adjustedProjY: tm.projY,
-        adjustedProjX: tm.projX,
-        sigmaX: sigmaX_mm,
-        sigmaY: sigmaY_mm,
-        sigmaZ: sigmaZ_mm,
-        semiMajor: semiMajorM * 1000.0,
-        semiMinor: semiMinorM * 1000.0,
-        ellipseAzimuth: ellipseAzimuthGon,
-        sigmaH: sigmaH_mm,
-      };
-    } else {
-      // Fixed datum station (zero adjustment dispersion)
-      adjustedStations[id] = {
-        ...origSt,
-        adjustedX: adjCoord.x,
-        adjustedY: adjCoord.y,
-        adjustedZ: adjCoord.z,
-        adjustedLat: geo.lat,
-        adjustedLon: geo.lon,
-        adjustedH: geo.h,
-        adjustedProjY: tm.projY,
-        adjustedProjX: tm.projX,
-        sigmaX: 0.0,
-        sigmaY: 0.0,
-        sigmaZ: 0.0,
-        semiMajor: 0.0,
-        semiMinor: 0.0,
-        ellipseAzimuth: 0.0,
-        sigmaH: 0.0,
-      };
     }
-  }
 
-  return {
-    mode,
-    fixedStationIds,
-    unknownStationIds,
-    dof: effectiveDof,
-    totalObservations: numObs,
-    totalUnknowns: numUnknowns,
-    sigma0Apriori: 1.0,
-    sigma0Aposteriori,
-    vPv,
-    chiSquareTest: {
-      passed: chiPassed,
-      lowerLimit: chiLower,
-      upperLimit: chiUpper,
-      testStatistic: vPv,
-      confidenceLevel: 0.95,
-    },
-    stations: adjustedStations,
-    baselines: finalBaselines,
-    outliers,
-    iterations,
-    maxDisplacementMm,
-    adjustedAt: new Date().toISOString(),
-  };
+    return {
+      mode,
+      fixedStationIds,
+      unknownStationIds,
+      dof: effectiveDof,
+      totalObservations: numObs,
+      totalUnknowns: numUnknowns,
+      sigma0Apriori: 1.0,
+      sigma0Aposteriori,
+      vPv,
+      chiSquareTest: {
+        passed: chiPassed,
+        lowerLimit: chiLower,
+        upperLimit: chiUpper,
+        testStatistic: vPv,
+        confidenceLevel: 0.95,
+      },
+      stations: adjustedStations,
+      baselines: finalBaselines,
+      outliers,
+      iterations,
+      maxDisplacementMm,
+      adjustedAt: new Date().toISOString(),
+    };
+  } catch (err) {
+    console.error('Error in perform3DNetworkAdjustment:', err);
+    return null;
+  }
 }
 
 // ============================================================================

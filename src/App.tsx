@@ -115,46 +115,78 @@ export default function App() {
 
   // Recalculate Loops
   const handleRecalculateLoops = useCallback(() => {
-    if (Object.keys(stations).length < 2 || baselines.length === 0) {
-      showToast('Döngü analizi için ağda en az 2 nokta ve baz vektörleri bulunmalıdır.');
+    let currentBaselines = baselines;
+    if (currentBaselines.length === 0 && Object.keys(stations).length >= 2) {
+      currentBaselines = generateBaselinesFromStations(stations);
+      setBaselines(currentBaselines);
+    }
+
+    if (Object.keys(stations).length < 2 || currentBaselines.length === 0) {
+      showToast('Döngü analizi için ağda en az 2 nokta bulunmalıdır.');
       return;
     }
     const loops = calculateLoopClosures(
       stations,
-      baselines,
+      currentBaselines,
       config.loopToleranceBaseMm,
       config.loopTolerancePpm
     );
     setLoopClosures(loops);
-    showToast(`Topoloji analiz edildi: ${loops.length} bağımsız döngü tespit edildi.`);
+    showToast(`Topoloji analiz edildi: ${loops.length} bağımsız üçgen döngüsü tespit edildi.`);
   }, [stations, baselines, config]);
 
-  // Run 3D Network Adjustment (F8)
+  // Run 3D Network Adjustment
   const handleRunAdjustment = useCallback(
     (mode: 'unconstrained' | 'constrained' = 'constrained') => {
-      if (Object.keys(stations).length < 2 || baselines.length === 0) {
-        showToast('Dengeleme hesabı için en az 2 nokta ve baz vektörleri gereklidir.');
+      let currentBaselines = baselines;
+      if (currentBaselines.length === 0 && Object.keys(stations).length >= 2) {
+        currentBaselines = generateBaselinesFromStations(stations);
+        setBaselines(currentBaselines);
+        const loops = calculateLoopClosures(
+          stations,
+          currentBaselines,
+          config.loopToleranceBaseMm,
+          config.loopTolerancePpm
+        );
+        setLoopClosures(loops);
+      }
+
+      if (Object.keys(stations).length < 2 || currentBaselines.length === 0) {
+        showToast('Dengeleme hesabı için en az 2 nokta gereklidir. Lütfen Veri Girişi adımından RINEX yükleyiniz.');
         return;
       }
       setIsLoading(true);
       setTimeout(() => {
-        const res = perform3DNetworkAdjustment(stations, baselines, mode, config);
-        if (mode === 'unconstrained') {
-          setUnconstrainedResult(res);
-        } else {
-          setConstrainedResult(res);
-        }
-        setAdjustmentResult(res);
-        setIsLoading(false);
+        try {
+          const res = perform3DNetworkAdjustment(stations, currentBaselines, mode, config);
+          if (mode === 'unconstrained') {
+            setUnconstrainedResult(res);
+          } else {
+            setConstrainedResult(res);
+          }
+          setAdjustmentResult(res);
 
-        if (res) {
-          showToast(
-            `3D Gauss-Markov Dengelemesi (${mode === 'constrained' ? 'Dayalı' : 'Serbest'}) tamamlandı! sigma_0: ${res.sigma0Aposteriori.toFixed(4)}`
-          );
-        } else {
-          showToast('Dengeleme başarısız oldu. Ağ geometrisini ve bazları kontrol ediniz.');
+          if (res) {
+            // If constrained adjustment, also update stations with adjusted coordinates for reports and downstream tabs
+            if (mode === 'constrained') {
+              setStations((prev) => ({
+                ...prev,
+                ...res.stations,
+              }));
+            }
+            showToast(
+              `3D Gauss-Markov Dengelemesi (${mode === 'constrained' ? 'Dayalı' : 'Serbest'}) tamamlandı! sigma_0: ${res.sigma0Aposteriori.toFixed(4)}`
+            );
+          } else {
+            showToast('Dengeleme için ağ geometrisini kontrol ediniz.');
+          }
+        } catch (err) {
+          console.error('Adjustment execution error:', err);
+          showToast('Dengeleme hesabı sırasında bir hata oluştu.');
+        } finally {
+          setIsLoading(false);
         }
-      }, 500);
+      }, 350);
     },
     [stations, baselines, config]
   );

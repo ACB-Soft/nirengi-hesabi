@@ -379,8 +379,8 @@ export const AdjustmentTab: React.FC<Props> = ({
           <BarChart3 className="w-10 h-10 text-slate-300 mx-auto" />
           <h3 className="text-sm font-bold text-slate-800">Henüz 3D Ağ Dengelemesi Hesaplanmadı</h3>
           <p className="text-xs text-slate-500 max-w-md mx-auto">
-            Noktalar ve baz vektörleri hazır olduğunda yukarıdaki "Dengelemeyi Hesapla (F8)" butonuna basarak 
-            Dayalı veya Serbest Gauss-Markov dengelemesini çalıştırabilirsiniz.
+            Noktalar ve baz vektörleri hazır olduğunda yukarıdaki &quot;{isFree ? 'Serbest Dengelemeyi Hesapla' : 'Dayalı Dengelemeyi Hesapla'}&quot; butonuna basarak 
+            3D Gauss-Markov dengelemesini çalıştırabilirsiniz.
           </p>
         </div>
       )}

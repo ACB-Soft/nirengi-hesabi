@@ -13,6 +13,7 @@ import {
   geodeticToEcef,
   geodeticToTM,
   tmToGeodetic,
+  computeStationEpochCoordinates,
 } from '../utils/geodesy';
 import {
   ShieldCheck,
@@ -136,20 +137,22 @@ export const FixedCoordinatesTab: React.FC<Props> = ({
       finalZ = ecef.z;
     }
 
-    onUpdateStation({
+    const rawSt: Station = {
       ...st,
-      x: finalX,
-      y: finalY,
-      z: finalZ,
-      lat: finalLat,
-      lon: finalLon,
-      h: finalH,
-      projY: finalProjY,
-      projX: finalProjX,
+      refX: finalX,
+      refY: finalY,
+      refZ: finalZ,
+      refLat: finalLat,
+      refLon: finalLon,
+      refH: finalH,
+      refProjY: finalProjY,
+      refProjX: finalProjX,
       isFixed: { x: true, y: true, z: true },
       type: 'CORS',
-    });
+    };
 
+    const computed = computeStationEpochCoordinates(rawSt, config.surveyEpoch, config.dom);
+    onUpdateStation(computed);
     setEditingStationId(null);
   };
 
@@ -160,19 +163,22 @@ export const FixedCoordinatesTab: React.FC<Props> = ({
     const geo = ecefToGeodetic(cat.x, cat.y, cat.z);
     const tm = geodeticToTM(geo.lat, geo.lon, config.dom);
 
-    onUpdateStation({
+    const rawSt: Station = {
       ...st,
-      x: cat.x,
-      y: cat.y,
-      z: cat.z,
-      lat: geo.lat,
-      lon: geo.lon,
-      h: geo.h,
-      projY: tm.projY,
-      projX: tm.projX,
+      refX: cat.x,
+      refY: cat.y,
+      refZ: cat.z,
+      refLat: geo.lat,
+      refLon: geo.lon,
+      refH: geo.h,
+      refProjY: tm.projY,
+      refProjX: tm.projX,
       isFixed: { x: true, y: true, z: true },
       type: 'CORS',
-    });
+    };
+
+    const computed = computeStationEpochCoordinates(rawSt, config.surveyEpoch, config.dom);
+    onUpdateStation(computed);
   };
 
   const handleToggleStationFixed = (st: Station) => {
@@ -228,14 +234,22 @@ export const FixedCoordinatesTab: React.FC<Props> = ({
 
           const tm = geodeticToTM(lat, lon, config.dom);
 
-          onUpdateStation({
+          const rawSt: Station = {
             ...st,
-            x, y, z, lat, lon, h,
-            projY: tm.projY,
-            projX: tm.projX,
+            refX: x,
+            refY: y,
+            refZ: z,
+            refLat: lat,
+            refLon: lon,
+            refH: h,
+            refProjY: tm.projY,
+            refProjX: tm.projX,
             type: 'CORS',
             isFixed: { x: true, y: true, z: true },
-          });
+          };
+
+          const computed = computeStationEpochCoordinates(rawSt, config.surveyEpoch, config.dom);
+          onUpdateStation(computed);
           updatedCount++;
         }
       }

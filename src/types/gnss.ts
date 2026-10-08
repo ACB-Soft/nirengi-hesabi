@@ -82,6 +82,15 @@ export interface Station {
   antenna: AntennaData;
   // Velocities for epoch shifting
   velocities: StationVelocities;
+  // 2005.00 Reference Epoch Coordinates (ITRF96 official karne coordinates)
+  refX?: number; // 2005.00 ECEF X (m)
+  refY?: number; // 2005.00 ECEF Y (m)
+  refZ?: number; // 2005.00 ECEF Z (m)
+  refLat?: number;
+  refLon?: number;
+  refH?: number;
+  refProjY?: number;
+  refProjX?: number;
   // Observation Epoch (automatically parsed from RINEX TIME OF FIRST OBS)
   observationEpoch?: number; // e.g. 2025.45
   observationDateStr?: string; // e.g. "2025-06-15 10:30:00 GPS"
@@ -274,15 +283,10 @@ export interface IgsOrbitInfo {
   doy: number;
   productType: 'FINAL' | 'RAPID' | 'ULTRA_RAPID';
   productName: string;
-  longFormatName: string;
   clkName: string;
-  longFormatClkName: string;
   cddisUrl: string;
   ignUrl: string;
-  ignFolderUrl: string;
   bkgUrl: string;
-  bkgFolderUrl: string;
-  sopacUrl: string;
   latencyDays: number;
   accuracyEstimate: string;
   recommendationText: string;
