@@ -159,15 +159,12 @@ export const HomeTab: React.FC<HomeTabProps> = ({
       {/* Hero Welcome Banner */}
       <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-sky-950 text-white rounded-3xl p-6 sm:p-10 shadow-xl border border-slate-700/60 relative overflow-hidden">
         <div className="relative z-10 max-w-2xl space-y-4">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-sky-500/10 border border-sky-400/20 text-sky-300 text-xs font-semibold">
-            <Radio className="w-3.5 h-3.5 text-sky-400 animate-pulse" />
-            <span>TUREF / ITRF96 & BÖHYY Uyumlu Jeodezik Motor</span>
-          </div>
+          
           <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
             Nirengi Hesabı ve GNSS Ağ Dengeleme Uygulamasına Hoş Geldiniz
           </h2>
           <p className="text-sm text-slate-300 leading-relaxed">
-            TUSAGA-Aktif CORS istasyonları ve Rover GNSS ölçülerini entegre edin, BÖHYY 2005.00 epok hızlarını enterpole edin, kapalı üçgen döngülerini (Loop Closure) denetleyin ve 3D Gauss-Markov modeli ile dayalı ağ dengelemesini gerçekleştirin.
+            TUSAGA-Aktif CORS istasyonları ve Rover GNSS ölçülerini entegre edin, TUSAGA 2005.00 epok hızlarını enterpole edin, kapalı üçgen döngülerini (Loop Closure) denetleyin ve 3D Gauss-Markov modeli ile dayalı ağ dengelemesini gerçekleştirin.
           </p>
         </div>
 
@@ -417,49 +414,6 @@ export const HomeTab: React.FC<HomeTabProps> = ({
           </div>
         </div>
       )}
-
-      {/* Workflow Information Strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="p-3.5 rounded-xl bg-white border border-slate-200 flex items-center gap-3 shadow-2xs">
-          <div className="w-8 h-8 rounded-lg bg-sky-100 text-sky-700 flex items-center justify-center shrink-0">
-            <Radio className="w-4 h-4" />
-          </div>
-          <div>
-            <div className="text-xs font-bold text-slate-800">CORS & Hız Hesabı</div>
-            <div className="text-[10px] text-slate-500">TUSAGA 2005.00 epok</div>
-          </div>
-        </div>
-
-        <div className="p-3.5 rounded-xl bg-white border border-slate-200 flex items-center gap-3 shadow-2xs">
-          <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
-            <Share2 className="w-4 h-4" />
-          </div>
-          <div>
-            <div className="text-xs font-bold text-slate-800">Bazlar & RTKLIB</div>
-            <div className="text-[10px] text-slate-500">Çift fark vektör çözümü</div>
-          </div>
-        </div>
-
-        <div className="p-3.5 rounded-xl bg-white border border-slate-200 flex items-center gap-3 shadow-2xs">
-          <div className="w-8 h-8 rounded-lg bg-purple-100 text-purple-700 flex items-center justify-center shrink-0">
-            <Sliders className="w-4 h-4" />
-          </div>
-          <div>
-            <div className="text-xs font-bold text-slate-800">Serbest & Dayalı</div>
-            <div className="text-[10px] text-slate-500">Gauss-Markov dengelemesi</div>
-          </div>
-        </div>
-
-        <div className="p-3.5 rounded-xl bg-white border border-slate-200 flex items-center gap-3 shadow-2xs">
-          <div className="w-8 h-8 rounded-lg bg-orange-100 text-orange-700 flex items-center justify-center shrink-0">
-            <FileText className="w-4 h-4" />
-          </div>
-          <div>
-            <div className="text-xs font-bold text-slate-800">BÖHYY Raporu</div>
-            <div className="text-[10px] text-slate-500">Resmi karne ve Excel</div>
-          </div>
-        </div>
-      </div>
 
       {/* Proje Yükle Modal */}
       {isLoadModalOpen && (
