@@ -27,13 +27,22 @@ import { StationsAntennaTab } from './components/StationsAntennaTab';
 import { BaselinesTab } from './components/BaselinesTab';
 import { LoopClosureTab } from './components/LoopClosureTab';
 import { AdjustmentTab } from './components/AdjustmentTab';
-import { FixedCoordinatesTab } from './components/FixedCoordinatesTab';
+import { ConstrainedAdjustmentTab } from './components/ConstrainedAdjustmentTab';
 import { MapTab } from './components/MapTab';
 import { ReportExportTab } from './components/ReportExportTab';
+import { HomeTab } from './components/HomeTab';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { OfflineIndicator } from './components/OfflineIndicator';
+import {
+  SavedProject,
+  getSavedProjects,
+  saveProjectToStorage,
+  updateProjectNameInStorage,
+  deleteProjectFromStorage,
+} from './utils/projectStorage';
 
 import {
+  Home,
   Settings,
   Radio,
   Activity,
@@ -50,33 +59,37 @@ import {
   AlertTriangle,
   Play,
   Zap,
+  Save,
+  FolderOpen,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
 
 type TabKey =
-  | 'settings'
+  | 'home'
   | 'stations'
   | 'baselines'
   | 'loops'
   | 'free_adjustment'
-  | 'fixed_coords'
   | 'constrained_adjustment'
   | 'report';
 
 const WORKFLOW_STEPS: { id: TabKey; title: string; subtitle: string }[] = [
-  { id: 'settings', title: 'Proje Ayarları', subtitle: 'Referans elipsoit, projeksiyon ve tolerans tanımları' },
-  { id: 'stations', title: 'Veri Girişi', subtitle: 'Rover & TUSAGA RINEX verileri, 2005 epok hızları ve IGS hassas yörünge' },
+  { id: 'home', title: 'Anasayfa', subtitle: 'Proje yönetimi, yeni proje başlatma ve kayıtlı projeler' },
+  { id: 'stations', title: 'Veri Girişi', subtitle: 'Proje ayarları, CORS ve RINEX nokta gözlem verileri' },
   { id: 'baselines', title: 'Bazlar & RTKLIB', subtitle: 'Çift fark baz vektörü türetme ve RTKLIB çözümü' },
   { id: 'loops', title: 'Loop Closure', subtitle: '3D kapalı üçgen döngüleri ve ağ haritası analizi' },
   { id: 'free_adjustment', title: 'Serbest Dengeleme', subtitle: 'İç tutarlılık ve kaba hata (Baarda w-testi) dengelemesi' },
-  { id: 'fixed_coords', title: 'Sabit Koordinatlar', subtitle: 'TUSAGA-Aktif resmi bilinen koordinat girişi' },
-  { id: 'constrained_adjustment', title: 'Dayalı Dengeleme', subtitle: 'CORS sabitli nihai 3D Gauss-Markov dengelemesi' },
-  { id: 'report', title: 'Rapor & Çıktı', subtitle: 'Resmi BÖHYY dengeleme karnesi ve dışa aktarım' },
+  { id: 'constrained_adjustment', title: 'Dayalı Dengeleme', subtitle: 'CORS sabit koordinat yönetimi ve nihai 3D Gauss-Markov dengelemesi' },
+  { id: 'report', title: 'Rapor ve Çıktı Al', subtitle: 'Resmi BÖHYY dengeleme karnesi ve dışa aktarım' },
 ];
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<TabKey>('settings');
+  const [activeTab, setActiveTab] = useState<TabKey>('home');
+
+  // Saved Projects & Persistence
+  const [savedProjects, setSavedProjects] = useState<SavedProject[]>(() => getSavedProjects());
+  const [currentProjectId, setCurrentProjectId] = useState<string>('project-' + Date.now());
 
   // Job Configurations
   const [config, setConfig] = useState<JobConfig>(DEFAULT_CONFIG);
@@ -290,6 +303,126 @@ export default function App() {
     handleRecalculateLoops();
   };
 
+  // Project Management Handlers
+  const handleNewProject = () => {
+    const newId = 'project-' + Date.now();
+    setCurrentProjectId(newId);
+    setConfig({
+      ...DEFAULT_CONFIG,
+      projectName: 'Yeni GNSS Nirengi Projesi',
+    });
+    setStations({});
+    setBaselines([]);
+    setLoopClosures([]);
+    setUnconstrainedResult(null);
+    setConstrainedResult(null);
+    setAdjustmentResult(null);
+    setActiveTab('stations');
+    showToast('Yeni proje başlatıldı. Lütfen nokta ve baz verilerini giriniz.');
+  };
+
+  const handleOpenProject = (project: SavedProject) => {
+    setCurrentProjectId(project.id);
+    if (project.data) {
+      if (project.data.config) {
+        setConfig({
+          ...DEFAULT_CONFIG,
+          ...project.data.config,
+          projectName: project.name || project.data.config.projectName || 'GNSS Projesi',
+        });
+      }
+      if (project.data.stations) setStations(project.data.stations);
+      if (project.data.baselines) setBaselines(project.data.baselines);
+      if (project.data.loopClosures) setLoopClosures(project.data.loopClosures);
+      if (project.data.unconstrainedResult) setUnconstrainedResult(project.data.unconstrainedResult);
+      if (project.data.constrainedResult) setConstrainedResult(project.data.constrainedResult);
+      if (project.data.adjustmentResult) setAdjustmentResult(project.data.adjustmentResult);
+    }
+    if (project.data?.constrainedResult || project.data?.adjustmentResult) {
+      setActiveTab('constrained_adjustment');
+    } else {
+      setActiveTab('stations');
+    }
+    showToast(`"${project.name}" projesi başarıyla açıldı.`);
+  };
+
+  const handleRestoreBackup = (data: any) => {
+    try {
+      const backupData = data.data || data;
+      const projName = data.name || data.projectName || backupData.config?.projectName || 'Yüklenen Proje';
+      const newProj: SavedProject = {
+        id: data.id || 'project-' + Date.now(),
+        name: projName,
+        calculatedAt: data.calculatedAt,
+        updatedAt: new Date().toLocaleDateString('tr-TR') + ' ' + new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
+        stationCount: Object.keys(backupData.stations || {}).length,
+        baselineCount: (backupData.baselines || []).length,
+        pointCount: Object.keys(backupData.stations || {}).length,
+        sigma0: backupData.adjustmentResult?.sigma0Aposteriori || backupData.constrainedResult?.sigma0Aposteriori,
+        isAccepted: backupData.adjustmentResult?.chiSquareTest?.passed ?? backupData.constrainedResult?.chiSquareTest?.passed,
+        data: {
+          config: backupData.config || DEFAULT_CONFIG,
+          stations: backupData.stations || {},
+          baselines: backupData.baselines || [],
+          loopClosures: backupData.loopClosures || [],
+          unconstrainedResult: backupData.unconstrainedResult || null,
+          constrainedResult: backupData.constrainedResult || null,
+          adjustmentResult: backupData.adjustmentResult || null,
+        },
+      };
+      saveProjectToStorage(newProj);
+      setSavedProjects(getSavedProjects());
+      handleOpenProject(newProj);
+    } catch (err) {
+      console.error('Backup restore error:', err);
+      showToast('Proje dosyası açılırken hata oluştu.');
+    }
+  };
+
+  const handleDeleteProject = (id: string) => {
+    deleteProjectFromStorage(id);
+    setSavedProjects(getSavedProjects());
+    showToast('Proje silindi.');
+  };
+
+  const handleRenameProject = (id: string, newName: string) => {
+    updateProjectNameInStorage(id, newName);
+    setSavedProjects(getSavedProjects());
+    if (currentProjectId === id) {
+      setConfig((prev) => ({ ...prev, projectName: newName }));
+    }
+    showToast('Proje ismi güncellendi.');
+  };
+
+  const handleSaveCurrentProject = () => {
+    const stCount = Object.keys(stations).length;
+    const bsCount = baselines.length;
+    const effectiveResult = constrainedResult || adjustmentResult || unconstrainedResult;
+    const project: SavedProject = {
+      id: currentProjectId,
+      name: config.projectName || 'GNSS Nirengi Projesi',
+      calculatedAt: effectiveResult ? (new Date().toLocaleDateString('tr-TR') + ' ' + new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })) : undefined,
+      updatedAt: new Date().toLocaleDateString('tr-TR') + ' ' + new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
+      stationCount: stCount,
+      baselineCount: bsCount,
+      pointCount: stCount,
+      sigma0: effectiveResult?.sigma0Aposteriori,
+      isAccepted: effectiveResult?.chiSquareTest?.passed,
+      data: {
+        config,
+        stations,
+        baselines,
+        loopClosures,
+        unconstrainedResult,
+        constrainedResult,
+        adjustmentResult,
+      },
+    };
+    saveProjectToStorage(project);
+    setSavedProjects(getSavedProjects());
+    showToast(`"${project.name}" projesi kaydedildi.`);
+  };
+
   const stationCount = Object.keys(stations).length;
   const activeBaselineCount = baselines.filter((b) => !b.excluded).length;
 
@@ -306,12 +439,23 @@ export default function App() {
               <img
                 src="./icon.svg"
                 alt="Nirengi Hesabı Logo"
-                className="w-11 h-11 sm:w-12 sm:h-12 object-contain shrink-0 drop-shadow-md hover:scale-105 transition-transform"
+                className="w-11 h-11 sm:w-12 sm:h-12 object-contain shrink-0 drop-shadow-md hover:scale-105 transition-transform cursor-pointer"
+                onClick={() => setActiveTab('home')}
               />
               <div>
-                <h1 className="text-base sm:text-lg font-bold tracking-tight text-white">
-                  Nirengi Hesabı
-                </h1>
+                <div className="flex items-center gap-2">
+                  <h1
+                    className="text-base sm:text-lg font-bold tracking-tight text-white cursor-pointer hover:text-sky-300 transition-colors"
+                    onClick={() => setActiveTab('home')}
+                  >
+                    Nirengi Hesabı
+                  </h1>
+                  {config.projectName && (
+                    <span className="hidden md:inline-block text-[11px] font-semibold bg-slate-800 text-slate-300 border border-slate-700 px-2 py-0.5 rounded-full max-w-[200px] truncate" title={config.projectName}>
+                      {config.projectName}
+                    </span>
+                  )}
+                </div>
                 <p className="text-xs text-slate-400 hidden sm:block">
                   Dayalı GNSS Nirengi Dengeleme Uygulaması
                 </p>
@@ -320,6 +464,14 @@ export default function App() {
 
             {/* Header Right Actions */}
             <div className="flex items-center gap-2">
+              <button
+                onClick={handleSaveCurrentProject}
+                className="px-3 py-1.5 bg-sky-700/80 hover:bg-sky-600 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 border border-sky-500/30 transition cursor-pointer shadow-xs active:scale-95"
+                title="Mevcut Projeyi Kaydet"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Projeyi Kaydet</span>
+              </button>
               <PWAInstallButton />
             </div>
           </div>
@@ -331,15 +483,15 @@ export default function App() {
         {/* Navigation Tabs */}
         <div className="flex border-b border-slate-200 mb-6 space-x-1 sm:space-x-2 no-print overflow-x-auto custom-scrollbar">
           <button
-            onClick={() => setActiveTab('settings')}
+            onClick={() => setActiveTab('home')}
             className={`px-3.5 py-2.5 text-xs sm:text-sm font-semibold border-b-2 flex items-center gap-2 whitespace-nowrap transition cursor-pointer ${
-              activeTab === 'settings'
+              activeTab === 'home'
                 ? 'border-sky-600 text-sky-600'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
-            <Settings className="w-4 h-4 text-slate-500" />
-            <span>Proje Ayarları</span>
+            <Home className="w-4 h-4 text-sky-600" />
+            <span>Anasayfa</span>
           </button>
 
           <button
@@ -407,26 +559,14 @@ export default function App() {
           </button>
 
           <button
-            onClick={() => setActiveTab('fixed_coords')}
-            className={`px-3.5 py-2.5 text-xs sm:text-sm font-semibold border-b-2 flex items-center gap-2 whitespace-nowrap transition cursor-pointer ${
-              activeTab === 'fixed_coords'
-                ? 'border-purple-600 text-purple-600'
-                : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <ShieldCheck className="w-4 h-4 text-purple-600" />
-            <span>Sabit Koordinatlar</span>
-          </button>
-
-          <button
             onClick={() => setActiveTab('constrained_adjustment')}
             className={`px-3.5 py-2.5 text-xs sm:text-sm font-semibold border-b-2 flex items-center gap-2 whitespace-nowrap transition cursor-pointer ${
               activeTab === 'constrained_adjustment'
-                ? 'border-sky-600 text-sky-600'
+                ? 'border-indigo-600 text-indigo-600'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
-            <BarChart3 className="w-4 h-4 text-indigo-600" />
+            <ShieldCheck className="w-4 h-4 text-indigo-600" />
             <span>Dayalı Dengeleme</span>
             {constrainedResult && (
               <span
@@ -446,16 +586,19 @@ export default function App() {
             }`}
           >
             <FileText className="w-4 h-4 text-orange-600" />
-            <span>Rapor & Çıktı</span>
+            <span>Rapor ve Çıktı Al</span>
           </button>
         </div>
 
         {/* Tab Views */}
-        {activeTab === 'settings' && (
-          <JobConfigTab
-            config={config}
-            onChange={setConfig}
-            onResetDefaults={() => setConfig(DEFAULT_CONFIG)}
+        {activeTab === 'home' && (
+          <HomeTab
+            onNewProject={handleNewProject}
+            onRestoreBackup={handleRestoreBackup}
+            onOpenProject={handleOpenProject}
+            savedProjects={savedProjects}
+            onDeleteProject={handleDeleteProject}
+            onRenameProject={handleRenameProject}
           />
         )}
 
@@ -465,6 +608,9 @@ export default function App() {
             dom={config.dom}
             timeZone={config.timeZone}
             surveyEpoch={config.surveyEpoch}
+            config={config}
+            onChangeConfig={setConfig}
+            onResetConfigDefaults={() => setConfig(DEFAULT_CONFIG)}
             onUpdateStation={handleUpdateStation}
             onAddStation={handleAddStation}
             onDeleteStation={handleDeleteStation}
@@ -506,22 +652,12 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'fixed_coords' && (
-          <FixedCoordinatesTab
+        {activeTab === 'constrained_adjustment' && (
+          <ConstrainedAdjustmentTab
             stations={stations}
             config={config}
-            onUpdateStation={handleUpdateStation}
-            onNavigateToConstrainedAdjustment={() => {
-              setActiveTab('constrained_adjustment');
-            }}
-          />
-        )}
-
-        {activeTab === 'constrained_adjustment' && (
-          <AdjustmentTab
-            mode="constrained"
             adjustmentResult={constrainedResult || (adjustmentResult?.mode === 'constrained' ? adjustmentResult : null)}
-            config={config}
+            onUpdateStation={handleUpdateStation}
             onRunAdjustment={handleRunAdjustment}
             onExcludeOutliersAndReAdjust={handleExcludeOutliersAndReAdjust}
             isLoading={isLoading}
@@ -538,7 +674,7 @@ export default function App() {
         )}
 
         {/* Step Transition Navigation Bar */}
-        {(() => {
+        {activeTab !== 'home' && (() => {
           const currentStepIndex = WORKFLOW_STEPS.findIndex((s) => s.id === activeTab);
           const prevStep = currentStepIndex > 0 ? WORKFLOW_STEPS[currentStepIndex - 1] : null;
           const nextStep = currentStepIndex < WORKFLOW_STEPS.length - 1 ? WORKFLOW_STEPS[currentStepIndex + 1] : null;

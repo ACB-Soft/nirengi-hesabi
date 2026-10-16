@@ -58,6 +58,71 @@ export interface StationVelocities {
   vu?: number; // mm/year (Up)
 }
 
+export interface VelocityInterpolationDetail {
+  refId: string;
+  refName: string;
+  distKm: number;
+  weight: number;
+  weightPercent: number;
+  refVx: number;
+  refVy: number;
+  refVz: number;
+  refVe: number;
+  refVn: number;
+  refVu: number;
+}
+
+export interface VelocityReportItem {
+  id: string;
+  name: string;
+  type: StationType;
+  isFixed: boolean;
+  status: 'TUSAGA Sabit' | 'TUTGA Enterpolasyon' | 'Kullanıcı Tanımlı';
+  // 2005.00 Reference epoch coordinates
+  refX: number;
+  refY: number;
+  refZ: number;
+  refLat: number;
+  refLon: number;
+  refH: number;
+  refProjY: number;
+  refProjX: number;
+  // Velocities
+  vx: number; // m/year (ECEF X)
+  vy: number; // m/year (ECEF Y)
+  vz: number; // m/year (ECEF Z)
+  ve: number; // mm/year (East)
+  vn: number; // mm/year (North)
+  vu: number; // mm/year (Up)
+  vHorizontal: number; // mm/year: sqrt(ve^2 + vn^2)
+  vAzimuthGrad: number; // Grad: atan2(ve, vn) in [0, 400)
+  vAzimuthDeg: number;  // Deg: atan2(ve, vn) in [0, 360)
+  v3D: number; // mm/year: sqrt(ve^2 + vn^2 + vu^2)
+  // Survey epoch coordinates
+  surveyEpoch: number;
+  refEpoch: number;
+  dt: number;
+  surveyX: number;
+  surveyY: number;
+  surveyZ: number;
+  surveyLat: number;
+  surveyLon: number;
+  surveyH: number;
+  surveyProjY: number;
+  surveyProjX: number;
+  // Displacements
+  dX_m: number;
+  dY_m: number;
+  dZ_m: number;
+  dX_mm: number;
+  dY_mm: number;
+  dZ_mm: number;
+  dHorizontal_cm: number;
+  dSpatial_cm: number;
+  // IDW interpolation details if estimated
+  interpolationDetails?: VelocityInterpolationDetail[];
+}
+
 export interface Station {
   id: string;
   name: string;

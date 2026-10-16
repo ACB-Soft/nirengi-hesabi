@@ -17,6 +17,8 @@ import {
   AntennaData,
   GeoCalcPoint,
   StationVelocities,
+  VelocityReportItem,
+  VelocityInterpolationDetail,
   RinexOccupation,
   SatelliteTrack,
   GnssConstellation,
@@ -39,6 +41,9 @@ export const TUSAGA_VELOCITY_CATALOG: Record<string, StationVelocities & { name:
   ERZU: { name: 'ERZU (Erzurum)', city: 'Erzurum', vx: -0.0125, vy: -0.0180, vz: 0.0102, ve: -18.2, vn: 11.5, vu: 1.3 },
   ADAN: { name: 'ADAN (Adana)', city: 'Adana', vx: -0.0170, vy: -0.0235, vz: 0.0078, ve: -23.5, vn: 15.0, vu: 0.7 },
   BURS: { name: 'BURS (Bursa)', city: 'Bursa', vx: -0.0150, vy: -0.0215, vz: 0.0085, ve: -21.6, vn: 13.8, vu: 1.0 },
+  BRS1: { name: 'BRS1 (Bursa Merkez CORS)', city: 'Bursa', vx: -0.0163, vy: -0.0215, vz: 0.0085, ve: -21.6, vn: 13.8, vu: 1.0 },
+  HARC: { name: 'HARC (Harmancık CORS)', city: 'Bursa', vx: -0.0172, vy: -0.0228, vz: 0.0078, ve: -22.9, vn: 14.5, vu: 0.8 },
+  BAN1: { name: 'BAN1 (Bandırma CORS)', city: 'Balıkesir', vx: -0.0155, vy: -0.0220, vz: 0.0082, ve: -22.1, vn: 14.1, vu: 1.1 },
   SIVA: { name: 'SIVA (Sivas)', city: 'Sivas', vx: -0.0138, vy: -0.0198, vz: 0.0095, ve: -19.9, vn: 12.8, vu: 1.2 },
   SAMS: { name: 'SAMS (Samsun)', city: 'Samsun', vx: -0.0120, vy: -0.0175, vz: 0.0105, ve: -17.6, vn: 11.0, vu: 1.5 },
   YOZG: { name: 'YOZG (Yozgat)', city: 'Yozgat', vx: -0.0140, vy: -0.0208, vz: 0.0090, ve: -20.9, vn: 13.3, vu: 1.1 },
@@ -2282,17 +2287,86 @@ export function estimateVelocitiesByTUTGA(
     }
 
     if (sumWeight > 0) {
+      const vx = Number((sumVx / sumWeight).toFixed(5));
+      const vy = Number((sumVy / sumWeight).toFixed(5));
+      const vz = Number((sumVz / sumWeight).toFixed(5));
+      const topo = cartesianToTopocentricVelocity(vx, vy, vz, st.lat || 39.0, st.lon || 35.0);
       estimated[st.id] = {
-        vx: Number((sumVx / sumWeight).toFixed(5)),
-        vy: Number((sumVy / sumWeight).toFixed(5)),
-        vz: Number((sumVz / sumWeight).toFixed(5)),
+        vx,
+        vy,
+        vz,
+        ve: topo.ve,
+        vn: topo.vn,
+        vu: topo.vu,
       };
     } else {
-      estimated[st.id] = defaultVel;
+      const topo = cartesianToTopocentricVelocity(defaultVel.vx, defaultVel.vy, defaultVel.vz, st.lat || 39.0, st.lon || 35.0);
+      estimated[st.id] = {
+        ...defaultVel,
+        ve: topo.ve,
+        vn: topo.vn,
+        vu: topo.vu,
+      };
     }
   }
 
   return estimated;
+}
+
+/**
+ * Returns IDW interpolation breakdown for an unknown station based on reference CORS stations.
+ */
+export function getStationInterpolationDetails(
+  st: Station,
+  stations: Record<string, Station>
+): VelocityInterpolationDetail[] {
+  const stationList = Object.values(stations);
+  const refStations = stationList.filter(
+    (s) => s.id !== st.id && (s.isFixed.x || s.type === 'CORS' || (s.velocities && (s.velocities.vx !== 0 || s.velocities.vy !== 0)))
+  );
+
+  if (refStations.length === 0) return [];
+
+  let sumWeight = 0;
+  const items: Array<{
+    ref: Station;
+    distKm: number;
+    weight: number;
+  }> = [];
+
+  for (const ref of refStations) {
+    const dx = st.x - ref.x;
+    const dy = st.y - ref.y;
+    const dz = st.z - ref.z;
+    const distKm = Math.sqrt(dx * dx + dy * dy + dz * dz) / 1000.0;
+    const d = Math.max(distKm, 0.05);
+    const weight = 1.0 / (d * d);
+    sumWeight += weight;
+    items.push({ ref, distKm, weight });
+  }
+
+  return items.map((item) => {
+    const topo = cartesianToTopocentricVelocity(
+      item.ref.velocities.vx,
+      item.ref.velocities.vy,
+      item.ref.velocities.vz,
+      item.ref.lat || 39.0,
+      item.ref.lon || 35.0
+    );
+    return {
+      refId: item.ref.id,
+      refName: item.ref.name,
+      distKm: Number(item.distKm.toFixed(2)),
+      weight: Number(item.weight.toFixed(6)),
+      weightPercent: sumWeight > 0 ? Number(((item.weight / sumWeight) * 100).toFixed(2)) : 0,
+      refVx: item.ref.velocities.vx,
+      refVy: item.ref.velocities.vy,
+      refVz: item.ref.velocities.vz,
+      refVe: item.ref.velocities.ve ?? topo.ve,
+      refVn: item.ref.velocities.vn ?? topo.vn,
+      refVu: item.ref.velocities.vu ?? topo.vu,
+    };
+  });
 }
 
 /**
@@ -2555,6 +2629,329 @@ export function exportAdjustmentToExcel(
   const fileName = `${config.projectName.replace(/\s+/g, '_')}_Dengeleme_Raporu.xlsx`;
   XLSX.writeFile(wb, fileName);
 }
+
+// ============================================================================
+// OFFICIAL VELOCITY CALCULATION & EXCEL EXPORT (BÖHYY & HGM Standards)
+// ============================================================================
+
+/**
+ * Generates comprehensive structured velocity and epoch transformation data
+ * for all stations conforming to HGM TUSAGA-Aktif & BÖHYY standards.
+ */
+export function generateVelocityReportData(
+  stations: Record<string, Station>,
+  surveyEpoch: number = 2024.45,
+  refEpoch: number = 2005.00,
+  domDeg: number = 30
+): VelocityReportItem[] {
+  const stationList = Object.values(stations);
+  const dt = surveyEpoch - refEpoch;
+
+  // Compute TUTGA IDW velocity estimates for all stations
+  const estimates = estimateVelocitiesByTUTGA(stations);
+
+  return stationList.map((st) => {
+    const isFixed = Boolean(st.isFixed.x && st.isFixed.y && st.isFixed.z) || st.type === 'CORS';
+    const status: 'TUSAGA Sabit' | 'TUTGA Enterpolasyon' | 'Kullanıcı Tanımlı' = isFixed
+      ? 'TUSAGA Sabit'
+      : (estimates[st.id] ? 'TUTGA Enterpolasyon' : 'Kullanıcı Tanımlı');
+
+    // 2005.00 Reference coordinates
+    const refX = typeof st.refX === 'number' && !isNaN(st.refX) && st.refX !== 0 ? st.refX : st.x;
+    const refY = typeof st.refY === 'number' && !isNaN(st.refY) && st.refY !== 0 ? st.refY : st.y;
+    const refZ = typeof st.refZ === 'number' && !isNaN(st.refZ) && st.refZ !== 0 ? st.refZ : st.z;
+
+    const refGeo = ecefToGeodetic(refX, refY, refZ);
+    const refTM = geodeticToTM(refGeo.lat, refGeo.lon, domDeg);
+
+    // Velocities
+    const vel = (st.velocities && (st.velocities.vx !== 0 || st.velocities.vy !== 0))
+      ? st.velocities
+      : (estimates[st.id] || { vx: 0, vy: 0, vz: 0 });
+
+    const vx = vel.vx || 0;
+    const vy = vel.vy || 0;
+    const vz = vel.vz || 0;
+
+    const topo = cartesianToTopocentricVelocity(vx, vy, vz, refGeo.lat, refGeo.lon);
+    const ve = typeof vel.ve === 'number' && !isNaN(vel.ve) ? vel.ve : topo.ve;
+    const vn = typeof vel.vn === 'number' && !isNaN(vel.vn) ? vel.vn : topo.vn;
+    const vu = typeof vel.vu === 'number' && !isNaN(vel.vu) ? vel.vu : topo.vu;
+
+    const vHorizontal = Math.sqrt(ve * ve + vn * vn);
+    const v3D = Math.sqrt(ve * ve + vn * vn + vu * vu);
+
+    // Azimuth in Grad [0, 400) and Degree [0, 360)
+    const vAzRad = Math.atan2(ve, vn);
+    const vAzGrad = ((vAzRad * 200.0 / Math.PI) + 400.0) % 400.0;
+    const vAzDeg = ((vAzRad * 180.0 / Math.PI) + 360.0) % 360.0;
+
+    // Survey epoch coordinates
+    const surveyX = refX + vx * dt;
+    const surveyY = refY + vy * dt;
+    const surveyZ = refZ + vz * dt;
+    const surveyGeo = ecefToGeodetic(surveyX, surveyY, surveyZ);
+    const surveyTM = geodeticToTM(surveyGeo.lat, surveyGeo.lon, domDeg);
+
+    // Displacements
+    const dX_m = surveyX - refX;
+    const dY_m = surveyY - refY;
+    const dZ_m = surveyZ - refZ;
+    const dX_mm = dX_m * 1000.0;
+    const dY_mm = dY_m * 1000.0;
+    const dZ_mm = dZ_m * 1000.0;
+    const dSpatial_cm = Math.sqrt(dX_m * dX_m + dY_m * dY_m + dZ_m * dZ_m) * 100.0;
+    const dHorizontal_cm = Math.sqrt(dX_m * dX_m + dY_m * dY_m) * 100.0;
+
+    // Interpolation details if not a fixed reference station
+    const interpolationDetails = !isFixed ? getStationInterpolationDetails(st, stations) : undefined;
+
+    return {
+      id: st.id,
+      name: st.name,
+      type: st.type,
+      isFixed,
+      status,
+      refX,
+      refY,
+      refZ,
+      refLat: refGeo.lat,
+      refLon: refGeo.lon,
+      refH: refGeo.h,
+      refProjY: refTM.projY,
+      refProjX: refTM.projX,
+      vx,
+      vy,
+      vz,
+      ve,
+      vn,
+      vu,
+      vHorizontal: Number(vHorizontal.toFixed(2)),
+      vAzimuthGrad: Number(vAzGrad.toFixed(2)),
+      vAzimuthDeg: Number(vAzDeg.toFixed(2)),
+      v3D: Number(v3D.toFixed(2)),
+      surveyEpoch,
+      refEpoch,
+      dt,
+      surveyX,
+      surveyY,
+      surveyZ,
+      surveyLat: surveyGeo.lat,
+      surveyLon: surveyGeo.lon,
+      surveyH: surveyGeo.h,
+      surveyProjY: surveyTM.projY,
+      surveyProjX: surveyTM.projX,
+      dX_m,
+      dY_m,
+      dZ_m,
+      dX_mm,
+      dY_mm,
+      dZ_mm,
+      dHorizontal_cm: Number(dHorizontal_cm.toFixed(2)),
+      dSpatial_cm: Number(dSpatial_cm.toFixed(2)),
+      interpolationDetails,
+    };
+  });
+}
+
+/**
+ * Exports official TUSAGA-Aktif & BÖHYY Velocity Calculation and Epoch Shift Report to Excel (.xlsx)
+ * Matching the exact structure of HIZ.png and BÖHYY standards.
+ */
+export function exportVelocityReportToExcel(
+  stations: Record<string, Station>,
+  surveyEpoch: number = 2024.45,
+  refEpoch: number = 2005.00,
+  domDeg: number = 30,
+  projectName: string = 'GNSS Hız Hesabı Projesi'
+) {
+  const wb = XLSX.utils.book_new();
+  const items = generateVelocityReportData(stations, surveyEpoch, refEpoch, domDeg);
+  const dt = surveyEpoch - refEpoch;
+
+  // Sheet 1: Hız Hesabı Raporu (HIZ.png standardı)
+  const sheet1Data: any[][] = [
+    ['T.C. HARİTA GENEL MÜDÜRLÜĞÜ & BÖHYY STANDARTLARINDA HIZ HESABI RAPORU', ''],
+    ['Proje Adı', projectName],
+    ['Referans Epoğu (t0)', `${refEpoch.toFixed(2)} (ITRF96 / TUREF)`],
+    ['Ölçü Epoğu (t)', `${surveyEpoch.toFixed(2)}`],
+    ['Epok Farkı (Δt)', `${dt.toFixed(2)} Yıl`],
+    ['Koordinat Sistemi / Elipsoit', `TUREF-TM${domDeg} / GRS80 (DOM: ${domDeg}°)`],
+    ['Rapor Oluşturma Tarihi', new Date().toLocaleString('tr-TR')],
+    [''],
+    [
+      'Nokta No',
+      'Nokta Tipi',
+      'Durum',
+      'X_2005 (m)',
+      'Y_2005 (m)',
+      'Z_2005 (m)',
+      'Enlem B (Derece)',
+      'Boylam L (Derece)',
+      'Elipsoidal H (m)',
+      'Vx (m/yıl)',
+      'Vy (m/yıl)',
+      'Vz (m/yıl)',
+      'Ve (mm/yıl)',
+      'Vn (mm/yıl)',
+      'Vu (mm/yıl)',
+      'V_yatay (mm/yıl)',
+      'Hız Azimutu (Grad)',
+      'V_3D (mm/yıl)',
+      'Hız Belirleme Yöntemi',
+    ],
+  ];
+
+  for (const it of items) {
+    sheet1Data.push([
+      it.name,
+      it.type,
+      it.status,
+      it.refX.toFixed(4),
+      it.refY.toFixed(4),
+      it.refZ.toFixed(4),
+      it.refLat.toFixed(8),
+      it.refLon.toFixed(8),
+      it.refH.toFixed(4),
+      it.vx.toFixed(5),
+      it.vy.toFixed(5),
+      it.vz.toFixed(5),
+      it.ve.toFixed(2),
+      it.vn.toFixed(2),
+      it.vu.toFixed(2),
+      it.vHorizontal.toFixed(2),
+      it.vAzimuthGrad.toFixed(2),
+      it.v3D.toFixed(2),
+      it.isFixed ? 'TUSAGA Resmi Karne' : 'TUTGA IDW Enterpolasyon',
+    ]);
+  }
+
+  const wsSheet1 = XLSX.utils.aoa_to_sheet(sheet1Data);
+  XLSX.utils.book_append_sheet(wb, wsSheet1, 'Hız Hesabı');
+
+  // Sheet 2: Ölçü Epoğu Koordinatları
+  const sheet2Data: any[][] = [
+    ['ÖLÇÜ EPOĞU (t) KOORDİNATLARI VE TEKTONİK DEPLASMANLAR', ''],
+    ['Referans Epok', `${refEpoch.toFixed(2)}`],
+    ['Ölçü Epoğu', `${surveyEpoch.toFixed(2)}`],
+    ['Δt', `${dt.toFixed(2)} Yıl`],
+    [''],
+    [
+      'Nokta No',
+      'Durum',
+      'X(t) (m)',
+      'Y(t) (m)',
+      'Z(t) (m)',
+      'Enlem(t) (Derece)',
+      'Boylam(t) (Derece)',
+      'Elipsoidal H(t) (m)',
+      'TM Sağa Y(t) (m)',
+      'TM Yukarı X(t) (m)',
+      'ΔX (mm)',
+      'ΔY (mm)',
+      'ΔZ (mm)',
+      'Yatay Kayma (cm)',
+      'Toplam 3D Kayma (cm)',
+    ],
+  ];
+
+  for (const it of items) {
+    sheet2Data.push([
+      it.name,
+      it.status,
+      it.surveyX.toFixed(4),
+      it.surveyY.toFixed(4),
+      it.surveyZ.toFixed(4),
+      it.surveyLat.toFixed(8),
+      it.surveyLon.toFixed(8),
+      it.surveyH.toFixed(4),
+      it.surveyProjY.toFixed(4),
+      it.surveyProjX.toFixed(4),
+      it.dX_mm.toFixed(1),
+      it.dY_mm.toFixed(1),
+      it.dZ_mm.toFixed(1),
+      it.dHorizontal_cm.toFixed(2),
+      it.dSpatial_cm.toFixed(2),
+    ]);
+  }
+
+  const wsSheet2 = XLSX.utils.aoa_to_sheet(sheet2Data);
+  XLSX.utils.book_append_sheet(wb, wsSheet2, 'Ölçü Epoğu Koordinatları');
+
+  // Sheet 3: TUTGA IDW Enterpolasyon Detayları
+  const sheet3Data: any[][] = [
+    ['TUTGA TERS UZAKLIK AĞIRLIKLI (IDW) HIZ ENTERPOLASYONU HESAP DÖKÜMÜ', ''],
+    ['Model', 'Ters Uzaklık Karesi (p = 1 / d^2) Ağırlık Fonksiyonu'],
+    [''],
+    [
+      'Hesaplanan Nokta',
+      'Referans CORS İstasyonu',
+      'Mesafe d (km)',
+      'Ağırlık p = 1/d²',
+      'Ağırlık Katkısı (%)',
+      'Ref Vx (m/yıl)',
+      'Ref Vy (m/yıl)',
+      'Ref Vz (m/yıl)',
+      'Ref Ve (mm/yıl)',
+      'Ref Vn (mm/yıl)',
+      'Ref Vu (mm/yıl)',
+    ],
+  ];
+
+  let hasInterp = false;
+  for (const it of items) {
+    if (it.interpolationDetails && it.interpolationDetails.length > 0) {
+      hasInterp = true;
+      for (const d of it.interpolationDetails) {
+        sheet3Data.push([
+          it.name,
+          d.refName,
+          d.distKm.toFixed(2),
+          d.weight.toFixed(6),
+          `${d.weightPercent.toFixed(2)}%`,
+          d.refVx.toFixed(5),
+          d.refVy.toFixed(5),
+          d.refVz.toFixed(5),
+          d.refVe.toFixed(2),
+          d.refVn.toFixed(2),
+          d.refVu.toFixed(2),
+        ]);
+      }
+    }
+  }
+
+  if (!hasInterp) {
+    sheet3Data.push(['Ağda enterpolasyon uygulanan ara nokta bulunmamaktadır.', '', '', '', '', '', '', '', '', '', '']);
+  }
+
+  const wsSheet3 = XLSX.utils.aoa_to_sheet(sheet3Data);
+  XLSX.utils.book_append_sheet(wb, wsSheet3, 'Enterpolasyon Detayları');
+
+  // Sheet 4: Matematiksel Model ve Standartlar
+  const sheet4Data = [
+    ['BÖHYY & HGM TUSAGA-AKTİF HIZ HESABI METODOLOJİSİ', ''],
+    ['Mevzuat', 'Büyük Ölçekli Harita ve Harita Bilgileri Üretim Yönetmeliği (BÖHYY) Madde 20 & 21'],
+    ['Datum', 'TUREF / ITRF96 (Uluslararası Karasal Referans Sistemi)'],
+    ['Referans Epok (t0)', '2005.00'],
+    ['Elipsoit', 'GRS80 (a = 6378137.0 m, 1/f = 298.257222101)'],
+    ['Dönüşüm Matrisi', 'ECEF Kartezyen ve Yerel Toposentrik (Doğu, Kuzey, Yukarı) koordinat dönüşümü:'],
+    ['Ve Formülü', 'Ve = (-sin(λ) * Vx + cos(λ) * Vy) * 1000  (mm/yıl)'],
+    ['Vn Formülü', 'Vn = (-sin(φ)*cos(λ) * Vx - sin(φ)*sin(λ) * Vy + cos(φ) * Vz) * 1000  (mm/yıl)'],
+    ['Vu Formülü', 'Vu = (cos(φ)*cos(λ) * Vx + cos(φ)*sin(λ) * Vy + sin(φ) * Vz) * 1000  (mm/yıl)'],
+    ['Epok Öteleme', 'X(t) = X_2005 + Vx * (t - 2005.00)'],
+    ['Yatay Hız', 'V_yatay = sqrt(Ve^2 + Vn^2)'],
+    ['Hız Azimutu', 'Azimut = atan2(Ve, Vn) [Grad biriminde, 0-400 aralığı]'],
+    ['Enterpolasyon', 'TUTGA Hız Alanı: p_i = 1 / d_i^2 ağırlıklı ortalama yöntemi (IDW)'],
+  ];
+  const wsSheet4 = XLSX.utils.aoa_to_sheet(sheet4Data);
+  XLSX.utils.book_append_sheet(wb, wsSheet4, 'Standartlar ve Metot');
+
+  const fileName = `${projectName.replace(/\s+/g, '_')}_Hiz_Hesabi_Raporu.xlsx`;
+  XLSX.writeFile(wb, fileName);
+}
+
+export const SAMPLE_VELOCITY_STATIONS: Record<string, Station> = {};
+
 
 // ============================================================================
 // PRELOADED DEMO DATASET (TUSAGA-Aktif & Central Anatolia Project)

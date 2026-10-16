@@ -8,7 +8,7 @@
 
 import React from 'react';
 import { JobConfig, AdjustmentResult, LoopClosure, Station } from '../types/gnss';
-import { exportAdjustmentToExcel } from '../utils/geodesy';
+import { exportAdjustmentToExcel, exportVelocityReportToExcel } from '../utils/geodesy';
 import {
   FileText,
   Download,
@@ -17,6 +17,7 @@ import {
   CheckCircle2,
   AlertTriangle,
   Award,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 interface Props {
@@ -32,14 +33,30 @@ export const ReportExportTab: React.FC<Props> = ({
   loopClosures,
   stations,
 }) => {
+  const handleExportVelocityExcel = () => {
+    exportVelocityReportToExcel(stations, config.surveyEpoch, config.refEpoch, config.dom, config.projectName);
+  };
+
   if (!adjustmentResult) {
     return (
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-12 text-center space-y-3">
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-8 sm:p-12 text-center space-y-4">
         <FileText className="w-12 h-12 text-slate-300 mx-auto" />
-        <h3 className="text-base font-bold text-slate-800">Henüz Dengeleme Hesabı Yapılmadı</h3>
+        <h3 className="text-base font-bold text-slate-800">Dengeleme Hesabı Henüz Çalıştırılmadı</h3>
         <p className="text-xs text-slate-500 max-w-md mx-auto">
-          Rapor ve çıktı alabilmek için lütfen "Dayalı Dengeleme" sekmesinden dengeleme hesabını çalıştırınız.
+          Dengeleme hesap karnesi ve hata elipsleri için "Dayalı Dengeleme" sekmesinden çözümü başlatabilirsiniz. 
+          İstasyonlarınıza ait resmi <strong>Hız Hesabı ve Epok Kaydırma Raporunu</strong> ise doğrudan Excel formatında indirebilirsiniz.
         </p>
+        {Object.keys(stations).length > 0 && (
+          <div className="pt-2">
+            <button
+              onClick={handleExportVelocityExcel}
+              className="px-5 py-2.5 text-xs font-bold bg-purple-700 hover:bg-purple-800 text-white rounded-xl shadow-sm transition cursor-pointer inline-flex items-center gap-2"
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              <span>Hız Hesabı Raporunu Excel (.xlsx) İndir</span>
+            </button>
+          </div>
+        )}
       </div>
     );
   }
@@ -152,11 +169,20 @@ export const ReportExportTab: React.FC<Props> = ({
 
           <div className="flex items-center gap-2 flex-wrap">
             <button
+              onClick={handleExportVelocityExcel}
+              className="px-3.5 py-2 text-xs font-bold bg-purple-700 hover:bg-purple-800 text-white rounded-lg shadow-sm transition cursor-pointer flex items-center gap-1.5"
+              title="BÖHYY standartlarında TUSAGA Hız Hesabı ve Epok Kaydırma Excel Raporunu indir"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              <span>Hız Hesabı Excel (.xlsx)</span>
+            </button>
+
+            <button
               onClick={handleExportExcel}
               className="px-3.5 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-sm transition cursor-pointer flex items-center gap-1.5"
             >
               <Download className="w-3.5 h-3.5" />
-              <span>Excel (.xlsx) İndir</span>
+              <span>Dengeleme Excel (.xlsx)</span>
             </button>
 
             <button
