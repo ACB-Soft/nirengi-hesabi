@@ -184,15 +184,15 @@ export const OccupationViewTab: React.FC<Props> = ({
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
-              <span className="bg-sky-100 text-sky-800 text-xs font-semibold px-2 py-0.5 rounded border border-sky-200">
-                TOPCON TOOLS OCCUPATION VIEW
+              <span className="bg-sky-100 text-sky-800 text-[10px] font-extrabold px-2 py-0.5 rounded border border-sky-200 uppercase">
+                GNSS OTURUM ANALİZİ
               </span>
               <h2 className="text-base font-bold text-slate-900">
                 GNSS Oturum ve Uydu Takip Grafiği (Occupation View)
               </h2>
             </div>
             <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-              Topcon Tools iş akışı Adım 2.4: Yüklenen RINEX gözlem oturumlarına ait çoklu takımyıldız 
+              Yüklenen RINEX gözlem oturumlarına ait çoklu takımyıldız 
               (GPS, GLONASS, Galileo, BeiDou) uydu geçiş çubukları, sinyal kalitesi (SNR) ve zaman serisi görünümü.
             </p>
           </div>

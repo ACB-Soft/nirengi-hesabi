@@ -47,6 +47,9 @@ import {
   matchAntennaInNoaaCatalog,
 } from '../data/noaaAntcal';
 import { OccupationViewTab } from './OccupationViewTab';
+import { RinexIngestionModal } from './RinexIngestionModal';
+import { parseRinexFile, createStationFromSummary } from '../utils/rinexStreamParser';
+import { saveRinexFileToOpfs } from '../utils/opfsStorage';
 import {
   Radio,
   Upload,
@@ -91,6 +94,7 @@ interface Props {
   onDeleteStation: (id: string) => void;
   onClearAllStations: () => void;
   onDetectedSurveyEpoch?: (epoch: number, dateStr?: string) => void;
+  onNavigateToQcTab?: (stnId?: string) => void;
 }
 
 export const StationsAntennaTab: React.FC<Props> = ({
@@ -106,6 +110,7 @@ export const StationsAntennaTab: React.FC<Props> = ({
   onDeleteStation,
   onClearAllStations,
   onDetectedSurveyEpoch,
+  onNavigateToQcTab,
 }) => {
   const [isConfigOpen, setIsConfigOpen] = useState(false);
   // Sort stations alphabetically by name
@@ -119,6 +124,9 @@ export const StationsAntennaTab: React.FC<Props> = ({
   const corsStations = useMemo(() => sortedStations.filter((s) => s.type === 'CORS' || (s.isFixed.x && s.isFixed.y && s.isFixed.z)), [sortedStations]);
 
   const [uploadFeedback, setUploadFeedback] = useState<string | null>(null);
+
+  // Advanced Offline RINEX Ingestion Modal State (Phase 1)
+  const [isRinexModalOpen, setIsRinexModalOpen] = useState(false);
 
   // Popup Modal States
   const [occupationModalStationId, setOccupationModalStationId] = useState<string | null>(null);
@@ -247,9 +255,9 @@ export const StationsAntennaTab: React.FC<Props> = ({
   };
 
   /**
-   * Generalized RINEX File Upload
+   * Generalized RINEX File Upload (High-Performance Chunk Streaming & OPFS)
    */
-  const processRinexFiles = (files: FileList, forcedType?: 'GROUND' | 'CORS') => {
+  const processRinexFiles = async (files: FileList | File[], forcedType?: 'GROUND' | 'CORS') => {
     let importedCount = 0;
     let skippedCount = 0;
     const validRinexRegex = /\.(obs|rnx|crx|nav|\d{2}[ogn]|[ogn])$/i;
@@ -263,69 +271,41 @@ export const StationsAntennaTab: React.FC<Props> = ({
         continue;
       }
 
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const text = event.target?.result as string;
-        if (!text) return;
-
-        const rinexStn = parseRinexHeader(text, file.name);
-        if (rinexStn && rinexStn.id) {
+      try {
+        const summary = await parseRinexFile(file, dom);
+        if (summary) {
           importedCount++;
-          const stnName = (rinexStn.name || rinexStn.id || 'PNT1').trim();
+          // Save to local OPFS in background without blocking
+          saveRinexFileToOpfs(file).catch(() => {});
 
-          const pointType: StationType = forcedType
-            ? forcedType
-            : rinexStn.type || (stnName.length <= 4 ? 'CORS' : 'GROUND');
+          const finalStation = createStationFromSummary(summary, {
+            surveyEpoch,
+            dom,
+            forcedType,
+          });
 
-          const isFixedStatus = pointType === 'CORS';
-
-          // Default velocities to 0 so the user explicitly enters official karne velocities
-          const rawStation: Station = {
-            ...(rinexStn as Station),
-            name: stnName,
-            type: pointType,
-            isFixed: { x: isFixedStatus, y: isFixedStatus, z: isFixedStatus },
-            refX: rinexStn.x,
-            refY: rinexStn.y,
-            refZ: rinexStn.z,
-            refLat: rinexStn.lat,
-            refLon: rinexStn.lon,
-            refH: rinexStn.h,
-            refProjY: rinexStn.projY,
-            refProjX: rinexStn.projX,
-            velocities: {
-              vx: 0,
-              vy: 0,
-              vz: 0,
-              ve: 0,
-              vn: 0,
-              vu: 0,
-            },
-          };
-
-          const finalStation = computeStationEpochCoordinates(rawStation, surveyEpoch, dom);
           onAddStation(finalStation);
-
-          const matched = matchAntennaInNoaaCatalog(finalStation.antenna?.model || '');
 
           if (finalStation.observationEpoch && onDetectedSurveyEpoch) {
             onDetectedSurveyEpoch(finalStation.observationEpoch, finalStation.observationDateStr);
           }
 
+          const matched = matchAntennaInNoaaCatalog(finalStation.antenna?.model || '');
           const epochMsg = finalStation.observationEpoch
             ? ` [Ölçü Epoğu: t = ${finalStation.observationEpoch.toFixed(2)}]`
             : '';
 
           setUploadFeedback(
-            `RINEX verisi (${file.name}) aktarıldı: "${finalStation.name}" [${pointType === 'CORS' ? 'TUSAGA Sabit' : 'Dengelenecek Ara Nokta'}] eklendi.${epochMsg} ${
+            `RINEX verisi (${file.name}) aktarıldı: "${finalStation.name}" [${(forcedType || summary.detectedPointType) === 'CORS' ? 'TUSAGA Sabit' : 'Dengelenecek Ara Nokta'}] eklendi.${epochMsg} ${
               matched
                 ? `[Anten: ${matched.displayName}]`
-                : `[Anten tanınamadı. .atx dosyası yükleyebilirsiniz]`
+                : `[Anten: ${finalStation.antenna?.model || '-'}]`
             }`
           );
         }
-      };
-      reader.readAsText(file);
+      } catch (err) {
+        console.error('RINEX parsing error for:', file.name, err);
+      }
     }
 
     if (skippedCount > 0 && importedCount === 0) {
@@ -668,10 +648,10 @@ export const StationsAntennaTab: React.FC<Props> = ({
           <div>
             <div className="flex items-center gap-2">
               <span className="bg-sky-100 text-sky-800 text-[10px] font-extrabold px-2 py-0.5 rounded border border-sky-300 uppercase">
-                Adım 2 / 8
+                1. Faz: Ingestion
               </span>
               <h2 className="text-base sm:text-lg font-bold text-slate-900">
-                Veri Girişi ve Jeodezik Gözlem Yönetimi
+                1. Faz: Veri Okuma, Ayrıştırma ve Gözlem Yönetimi
               </h2>
             </div>
             <p className="text-xs text-slate-500 mt-1 max-w-3xl">
@@ -681,6 +661,15 @@ export const StationsAntennaTab: React.FC<Props> = ({
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => setIsRinexModalOpen(true)}
+              className="px-3.5 py-2 text-xs font-bold bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-700 hover:to-indigo-700 text-white rounded-lg shadow-xs transition cursor-pointer flex items-center gap-1.5"
+              title="Çevrimdışı RINEX Veri İçe Aktarma & OPFS Depo Yöneticisi (Faz 1)"
+            >
+              <Radio className="w-3.5 h-3.5 text-sky-200 animate-pulse" />
+              <span>Çevrimdışı RINEX İçe Aktar (Faz 1)</span>
+            </button>
+
             {sortedStations.length > 0 && (
               <>
                 <button
@@ -952,7 +941,14 @@ export const StationsAntennaTab: React.FC<Props> = ({
             </p>
           </div>
 
-          <div className="pt-2 flex items-center justify-center gap-3">
+          <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
+            <button
+              onClick={() => setIsRinexModalOpen(true)}
+              className="px-5 py-2.5 text-xs font-bold bg-gradient-to-r from-sky-600 via-indigo-600 to-sky-700 hover:opacity-95 text-white rounded-xl shadow-sm transition cursor-pointer inline-flex items-center gap-2"
+            >
+              <Radio className="w-4 h-4 text-sky-200 animate-pulse" />
+              <span>Gelişmiş Çevrimdışı RINEX İçe Aktar (Faz 1)</span>
+            </button>
             <label className="px-5 py-2.5 text-xs font-bold bg-sky-600 hover:bg-sky-700 text-white rounded-xl shadow-sm transition cursor-pointer inline-flex items-center gap-2">
               <Upload className="w-4 h-4" />
               <span>Dengelenecek Rover Yükle</span>
@@ -1291,12 +1287,18 @@ export const StationsAntennaTab: React.FC<Props> = ({
                       <td className="py-2.5 px-3 text-center whitespace-nowrap">
                         <div className="flex items-center justify-center gap-1.5">
                           <button
-                            onClick={() => setOccupationModalStationId(st.id)}
+                            onClick={() => {
+                              if (onNavigateToQcTab) {
+                                onNavigateToQcTab(st.id);
+                              } else {
+                                setOccupationModalStationId(st.id);
+                              }
+                            }}
                             className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 rounded text-[11px] font-bold cursor-pointer flex items-center gap-1 transition"
-                            title="Uydu ve Zaman Takip Grafiğini Aç (Occupation View)"
+                            title="Uydu ve Gökyüzü Takip Grafiğini Aç (Skyplot & QC)"
                           >
-                            <Activity className="w-3.5 h-3.5 text-emerald-600" />
-                            <span>Uydu Grafiği</span>
+                            <Compass className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>QC / Skyplot</span>
                           </button>
 
                           <button
@@ -2243,6 +2245,25 @@ export const StationsAntennaTab: React.FC<Props> = ({
           </div>
         </div>
       )}
+
+      {/* ========================================================================= */}
+      {/* 4. ADVANCED OFFLINE RINEX INGESTION & OPFS MODAL (FAZ 1) */}
+      {/* ========================================================================= */}
+      <RinexIngestionModal
+        isOpen={isRinexModalOpen}
+        onClose={() => setIsRinexModalOpen(false)}
+        dom={dom}
+        surveyEpoch={surveyEpoch}
+        onAddStation={onAddStation}
+        onDetectedSurveyEpoch={onDetectedSurveyEpoch}
+        onNavigateToOccupationView={(stnId) => {
+          if (onNavigateToQcTab) {
+            onNavigateToQcTab(stnId);
+          } else {
+            setOccupationModalStationId(stnId);
+          }
+        }}
+      />
     </div>
   );
 };

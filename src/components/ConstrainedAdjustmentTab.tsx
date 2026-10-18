@@ -17,6 +17,7 @@ import {
   tmToGeodetic,
   computeStationEpochCoordinates,
 } from '../utils/geodesy';
+import { NetworkAdjustmentResultsView } from './NetworkAdjustmentResultsView';
 import {
   ShieldCheck,
   Building2,
@@ -50,6 +51,7 @@ interface Props {
   onRunAdjustment: (mode: 'constrained') => void;
   onExcludeOutliersAndReAdjust: (outlierIds: string[]) => void;
   isLoading: boolean;
+  onNavigateToReport?: () => void;
 }
 
 // Popular TUSAGA-Aktif Official Reference Station Coordinates (ITRF96 / TUREF)
@@ -79,6 +81,7 @@ export const ConstrainedAdjustmentTab: React.FC<Props> = ({
   onRunAdjustment,
   onExcludeOutliersAndReAdjust,
   isLoading,
+  onNavigateToReport,
 }) => {
   const stationList = Object.values(stations);
   const fixedStations = stationList.filter((s) => s.type === 'CORS' || s.isFixed.x || s.isFixed.y || s.isFixed.z);
@@ -103,9 +106,6 @@ export const ConstrainedAdjustmentTab: React.FC<Props> = ({
   // Batch paste modal state
   const [showBatchModal, setShowBatchModal] = useState(false);
   const [batchText, setBatchText] = useState('');
-
-  // Results Subtab
-  const [selectedSubTab, setSelectedSubTab] = useState<'coords' | 'residuals' | 'ellipses'>('coords');
 
   const handleStartEdit = (st: Station) => {
     setEditingStationId(st.id);
@@ -289,10 +289,10 @@ export const ConstrainedAdjustmentTab: React.FC<Props> = ({
           <div>
             <div className="flex items-center gap-2">
               <span className="bg-indigo-100 text-indigo-800 text-[10px] font-extrabold px-2.5 py-0.5 rounded border border-indigo-300 uppercase">
-                Tam Kısıtlı / CORS Sabitli 3D Ağ Dengelemesi
+                4. Faz: Dayalı Dengeleme
               </span>
               <h2 className="text-base sm:text-lg font-bold text-slate-900">
-                Sabit Koordinatlar ve Dayalı Ağ Dengelemesi
+                4. Faz: CORS Sabitli Dayalı 3D Ağ Dengelemesi
               </h2>
             </div>
             <p className="text-xs text-slate-500 mt-1 max-w-3xl">
@@ -310,6 +310,17 @@ export const ConstrainedAdjustmentTab: React.FC<Props> = ({
               <Play className="w-4 h-4 text-emerald-400" />
               <span>{isLoading ? 'Dengeleme Hesaplanıyor...' : 'Dayalı Dengelemeyi Hesapla'}</span>
             </button>
+
+            {adjustmentResult && onNavigateToReport && (
+              <button
+                onClick={onNavigateToReport}
+                className="px-4 py-2.5 text-xs sm:text-sm font-bold bg-rose-600 hover:bg-rose-700 text-white rounded-lg shadow-sm transition cursor-pointer flex items-center gap-2 active:scale-95 animate-fade-in"
+                title="5. Faz: Resmi BÖHYY Dengeleme Karnesi ve CAD/CBS Dışa Aktarıma Git"
+              >
+                <Award className="w-4 h-4 text-amber-300" />
+                <span>5. Faz: Resmi Karne &amp; CAD/CBS &rarr;</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -658,225 +669,12 @@ export const ConstrainedAdjustmentTab: React.FC<Props> = ({
             </p>
           </div>
         ) : (
-          <div className="space-y-4">
-            {/* Sub Navigation */}
-            <div className="flex border-b border-slate-200 space-x-4 text-xs font-bold">
-              <button
-                onClick={() => setSelectedSubTab('coords')}
-                className={`py-2 border-b-2 cursor-pointer transition ${
-                  selectedSubTab === 'coords'
-                    ? 'border-sky-600 text-sky-600'
-                    : 'border-transparent text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                Dengelenmiş Koordinatlar ({Object.keys(adjustmentResult.stations).length} Nokta)
-              </button>
-              <button
-                onClick={() => setSelectedSubTab('residuals')}
-                className={`py-2 border-b-2 cursor-pointer transition ${
-                  selectedSubTab === 'residuals'
-                    ? 'border-sky-600 text-sky-600'
-                    : 'border-transparent text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                Baz Düzeltmeleri ve Baarda w-Testi ({adjustmentResult.baselines.length} Baz)
-              </button>
-              <button
-                onClick={() => setSelectedSubTab('ellipses')}
-                className={`py-2 border-b-2 cursor-pointer transition ${
-                  selectedSubTab === 'ellipses'
-                    ? 'border-sky-600 text-sky-600'
-                    : 'border-transparent text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                %95 Güven Aralıklı Hata Elipsleri & Duyarlık
-              </button>
-            </div>
-
-            {/* SubTab 1: Coordinates */}
-            {selectedSubTab === 'coords' && (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
-                      <th className="py-2.5 px-3">Nokta ID</th>
-                      <th className="py-2.5 px-3">Durum</th>
-                      <th className="py-2.5 px-3 text-right">Dengelenmiş X (m)</th>
-                      <th className="py-2.5 px-3 text-right">Dengelenmiş Y (m)</th>
-                      <th className="py-2.5 px-3 text-right">Dengelenmiş Z (m)</th>
-                      <th className="py-2.5 px-3 text-right">TM Sağa Y (m)</th>
-                      <th className="py-2.5 px-3 text-right">TM Yukarı X (m)</th>
-                      <th className="py-2.5 px-3 text-right">Elip. H (m)</th>
-                      <th className="py-2.5 px-3 text-right">σ_X (mm)</th>
-                      <th className="py-2.5 px-3 text-right">σ_Y (mm)</th>
-                      <th className="py-2.5 px-3 text-right">σ_Z (mm)</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 font-mono">
-                    {Object.values(adjustmentResult.stations).map((st) => {
-                      const isFixed = st.isFixed.x && st.isFixed.y && st.isFixed.z;
-                      return (
-                        <tr key={st.id} className="hover:bg-slate-50">
-                          <td className="py-2.5 px-3 font-bold font-sans text-slate-900">{st.name}</td>
-                          <td className="py-2.5 px-3 font-sans">
-                            <span
-                              className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                isFixed ? 'bg-indigo-100 text-indigo-800' : 'bg-emerald-100 text-emerald-800'
-                              }`}
-                            >
-                              {isFixed ? 'SABİT (CORS)' : 'DENGELENDİ'}
-                            </span>
-                          </td>
-                          <td className="py-2.5 px-3 text-right text-slate-700">
-                            {(st.adjustedX ?? st.x).toFixed(4)}
-                          </td>
-                          <td className="py-2.5 px-3 text-right text-slate-700">
-                            {(st.adjustedY ?? st.y).toFixed(4)}
-                          </td>
-                          <td className="py-2.5 px-3 text-right text-slate-700">
-                            {(st.adjustedZ ?? st.z).toFixed(4)}
-                          </td>
-                          <td className="py-2.5 px-3 text-right font-bold text-sky-800">
-                            {(st.adjustedProjY ?? st.projY).toFixed(4)}
-                          </td>
-                          <td className="py-2.5 px-3 text-right font-bold text-sky-800">
-                            {(st.adjustedProjX ?? st.projX).toFixed(4)}
-                          </td>
-                          <td className="py-2.5 px-3 text-right font-bold text-slate-900">
-                            {(st.adjustedH ?? st.h).toFixed(4)}
-                          </td>
-                          <td className="py-2.5 px-3 text-right text-slate-600">
-                            {isFixed ? '0.0' : (st.sigmaX || 1.2).toFixed(1)}
-                          </td>
-                          <td className="py-2.5 px-3 text-right text-slate-600">
-                            {isFixed ? '0.0' : (st.sigmaY || 1.4).toFixed(1)}
-                          </td>
-                          <td className="py-2.5 px-3 text-right text-slate-600">
-                            {isFixed ? '0.0' : (st.sigmaZ || 1.8).toFixed(1)}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {/* SubTab 2: Residuals */}
-            {selectedSubTab === 'residuals' && (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
-                      <th className="py-2.5 px-3">Baz No</th>
-                      <th className="py-2.5 px-3">Güzergah</th>
-                      <th className="py-2.5 px-3 text-right">Uzunluk (m)</th>
-                      <th className="py-2.5 px-3 text-right">v_X (mm)</th>
-                      <th className="py-2.5 px-3 text-right">v_Y (mm)</th>
-                      <th className="py-2.5 px-3 text-right">v_Z (mm)</th>
-                      <th className="py-2.5 px-3 text-right">v_3D (mm)</th>
-                      <th className="py-2.5 px-3 text-right">Baarda w</th>
-                      <th className="py-2.5 px-3 text-center">Durum</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 font-mono">
-                    {adjustmentResult.baselines.map((b) => {
-                      const isOutlier = (b.wTest || 0) > config.wCrit;
-                      return (
-                        <tr key={b.id} className={`hover:bg-slate-50 ${isOutlier ? 'bg-rose-50/50' : ''}`}>
-                          <td className="py-2.5 px-3 font-bold font-sans text-slate-900">{b.id}</td>
-                          <td className="py-2.5 px-3 font-sans text-slate-700">
-                            {b.fromId} → {b.toId}
-                          </td>
-                          <td className="py-2.5 px-3 text-right text-slate-700">
-                            {b.length.toFixed(3)}
-                          </td>
-                          <td className="py-2.5 px-3 text-right text-slate-600">
-                            {(b.vX || 0).toFixed(1)}
-                          </td>
-                          <td className="py-2.5 px-3 text-right text-slate-600">
-                            {(b.vY || 0).toFixed(1)}
-                          </td>
-                          <td className="py-2.5 px-3 text-right text-slate-600">
-                            {(b.vZ || 0).toFixed(1)}
-                          </td>
-                          <td className="py-2.5 px-3 text-right font-bold text-slate-900">
-                            {(b.spatialV || 0).toFixed(1)}
-                          </td>
-                          <td
-                            className={`py-2.5 px-3 text-right font-bold ${
-                              isOutlier ? 'text-rose-600 font-extrabold' : 'text-slate-700'
-                            }`}
-                          >
-                            {(b.wTest || 0).toFixed(2)}
-                          </td>
-                          <td className="py-2.5 px-3 text-center font-sans">
-                            {isOutlier ? (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800 flex items-center justify-center gap-1">
-                                <AlertTriangle className="w-3 h-3 text-rose-600" />
-                                <span>KABA HATA</span>
-                              </span>
-                            ) : (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 flex items-center justify-center gap-1">
-                                <Check className="w-3 h-3 text-emerald-600" />
-                                <span>GEÇERLİ</span>
-                              </span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {/* SubTab 3: Error Ellipses */}
-            {selectedSubTab === 'ellipses' && (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
-                      <th className="py-2.5 px-3">Nokta ID</th>
-                      <th className="py-2.5 px-3 text-right">Yarı Büyük Eksen a (mm)</th>
-                      <th className="py-2.5 px-3 text-right">Yarı Küçük Eksen b (mm)</th>
-                      <th className="py-2.5 px-3 text-right">Elips Basıklığı (b/a)</th>
-                      <th className="py-2.5 px-3 text-right">Elips Azimutu (θ)</th>
-                      <th className="py-2.5 px-3 text-right">Düşey Duyarlık σ_H (mm)</th>
-                      <th className="py-2.5 px-3 text-center">BÖHYY Uygunluk</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 font-mono">
-                    {Object.values(adjustmentResult.stations).map((st) => {
-                      const isFixed = st.isFixed.x && st.isFixed.y && st.isFixed.z;
-                      const a = isFixed ? 0 : (st.semiMajor || 2.4);
-                      const b = isFixed ? 0 : (st.semiMinor || 1.6);
-                      const ratio = a > 0 ? (b / a).toFixed(2) : '1.00';
-                      const az = isFixed ? 0 : (st.ellipseAzimuth || 45);
-                      const sigH = isFixed ? 0 : (st.sigmaH || 3.8);
-
-                      return (
-                        <tr key={st.id} className="hover:bg-slate-50">
-                          <td className="py-2.5 px-3 font-bold font-sans text-slate-900">{st.name}</td>
-                          <td className="py-2.5 px-3 text-right text-slate-700">{a.toFixed(1)}</td>
-                          <td className="py-2.5 px-3 text-right text-slate-700">{b.toFixed(1)}</td>
-                          <td className="py-2.5 px-3 text-right text-slate-600">{ratio}</td>
-                          <td className="py-2.5 px-3 text-right text-slate-600">{az.toFixed(1)}°</td>
-                          <td className="py-2.5 px-3 text-right font-bold text-sky-800">{sigH.toFixed(1)}</td>
-                          <td className="py-2.5 px-3 text-center font-sans">
-                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 flex items-center justify-center gap-1">
-                              <Award className="w-3 h-3 text-emerald-600" />
-                              <span>BÖHYY UYGUN</span>
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+          <NetworkAdjustmentResultsView
+            adjustmentResult={adjustmentResult}
+            config={config}
+            mode="constrained"
+            onExcludeOutliersAndReAdjust={onExcludeOutliersAndReAdjust}
+          />
         )}
       </div>
 

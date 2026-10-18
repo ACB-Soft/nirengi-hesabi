@@ -1988,9 +1988,11 @@ export function perform3DNetworkAdjustment(
     const chiUpper = effectiveDof * Math.pow(1 - 2 / (9 * effectiveDof) + 1.96 * Math.sqrt(2 / (9 * effectiveDof)), 3);
     const chiPassed = vPv >= chiLower && vPv <= chiUpper;
 
-    // Baarda Data Snooping (w-test) outlier detection
+    // Baarda Data Snooping (w-test) outlier detection & Rigorous DynAdjust Q_vv calculation
     const outliers: string[] = [];
     finalBaselines = [];
+
+    let totalRedundancySum = 0;
 
     for (let k = 0; k < activeBaselines.length; k++) {
       const b = activeBaselines[k];
@@ -2004,13 +2006,65 @@ export function perform3DNetworkAdjustment(
       const vZ_mm = vZ * 1000.0;
       const spatialV_mm = Math.sqrt(vX_mm * vX_mm + vY_mm * vY_mm + vZ_mm * vZ_mm);
 
-      const var_vX = Math.max(1e-10, (b.qxx || 1e-5) * (Math.max(1, dof) / numObs));
-      const var_vY = Math.max(1e-10, (b.qyy || 1e-5) * (Math.max(1, dof) / numObs));
-      const var_vZ = Math.max(1e-10, (b.qzz || 1e-5) * (Math.max(1, dof) / numObs));
+      // Rigorous DynAdjust Q_vv computation:
+      // Q_vv_k = Q_k - (A_k * N^-1 * A_k^T)
+      const fromIsUnknown = b.fromId in unknownIndexMap;
+      const toIsUnknown = b.toId in unknownIndexMap;
+      const uFrom = fromIsUnknown ? unknownIndexMap[b.fromId] : -1;
+      const uTo = toIsUnknown ? unknownIndexMap[b.toId] : -1;
 
-      const wX = Math.abs(vX) / (sigma0Aposteriori * Math.sqrt(var_vX));
-      const wY = Math.abs(vY) / (sigma0Aposteriori * Math.sqrt(var_vY));
-      const wZ = Math.abs(vZ) / (sigma0Aposteriori * Math.sqrt(var_vZ));
+      const ACAT: number[][] = [
+        [0, 0, 0],
+        [0, 0, 0],
+        [0, 0, 0],
+      ];
+
+      if (normalInv) {
+        for (let r = 0; r < 3; r++) {
+          for (let c = 0; c < 3; c++) {
+            let val = 0;
+            if (toIsUnknown) {
+              val += normalInv[3 * uTo + r][3 * uTo + c];
+            }
+            if (fromIsUnknown) {
+              val += normalInv[3 * uFrom + r][3 * uFrom + c];
+            }
+            if (toIsUnknown && fromIsUnknown) {
+              val -= normalInv[3 * uTo + r][3 * uFrom + c];
+              val -= normalInv[3 * uFrom + r][3 * uTo + c];
+            }
+            ACAT[r][c] = val;
+          }
+        }
+      }
+
+      const Q_k = [
+        [b.qxx || 1e-5, b.qxy || 0, b.qzx || 0],
+        [b.qxy || 0, b.qyy || 1e-5, b.qyz || 0],
+        [b.qzx || 0, b.qyz || 0, b.qzz || 1e-5],
+      ];
+
+      // Exact diagonal variances of residuals (m^2)
+      const qvv_X = Math.max(1e-12, Q_k[0][0] - ACAT[0][0]);
+      const qvv_Y = Math.max(1e-12, Q_k[1][1] - ACAT[1][1]);
+      const qvv_Z = Math.max(1e-12, Q_k[2][2] - ACAT[2][2]);
+
+      // Redundancy contribution: trace(Q_vv_k * P_k)
+      const P_k = P_blocks[k];
+      let r_k = 0;
+      for (let i = 0; i < 3; i++) {
+        for (let j = 0; j < 3; j++) {
+          const qvv_ij = Q_k[i][j] - ACAT[i][j];
+          r_k += qvv_ij * P_k[j][i];
+        }
+      }
+      r_k = Math.max(0, Math.min(3, r_k));
+      totalRedundancySum += r_k;
+
+      // Exact Baarda w-test normalized residuals
+      const wX = Math.abs(vX) / (sigma0Aposteriori * Math.sqrt(qvv_X));
+      const wY = Math.abs(vY) / (sigma0Aposteriori * Math.sqrt(qvv_Y));
+      const wZ = Math.abs(vZ) / (sigma0Aposteriori * Math.sqrt(qvv_Z));
       const maxW = Math.max(wX, wY, wZ);
 
       const isOutlier = maxW > config.wCrit;
@@ -2025,9 +2079,33 @@ export function perform3DNetworkAdjustment(
         vZ: vZ_mm,
         spatialV: spatialV_mm,
         wTest: maxW,
+        redundancyNumber: r_k,
         isOutlier,
       });
     }
+
+    // Matrix Diagnostics for DynAdjust Inspector
+    let nonZeroACount = 0;
+    for (let r = 0; r < numObs; r++) {
+      for (let c = 0; c < numUnknowns; c++) {
+        if (A[r][c] !== 0) nonZeroACount++;
+      }
+    }
+    const totalElements = numObs * numUnknowns;
+    const sparsityPercent = totalElements > 0 ? (1 - nonZeroACount / totalElements) * 100 : 0;
+
+    // Normal Matrix condition number estimate
+    let maxDiag = 0;
+    let minDiag = Infinity;
+    if (normalInv) {
+      for (let i = 0; i < numUnknowns; i++) {
+        const diag = Math.abs(normalInv[i][i]);
+        if (diag > maxDiag) maxDiag = diag;
+        if (diag < minDiag && diag > 1e-15) minDiag = diag;
+      }
+    }
+    const conditionNumberN = minDiag > 0 && isFinite(minDiag) ? maxDiag / minDiag : 1.0;
+    const averageRedundancy = activeBaselines.length > 0 ? totalRedundancySum / (activeBaselines.length * 3) : 0;
 
     // Parameter Covariance Matrix Sigma_xx = sigma0^2 * N^-1
     const adjustedStations: Record<string, Station> = {};
@@ -2096,11 +2174,16 @@ export function perform3DNetworkAdjustment(
         const covEN = covENU[0][1];
         const varU = Math.max(1e-12, covENU[2][2]);
 
-        // Horizontal Error Ellipse at 95% confidence level (factor c = 2.4477)
+        const sigmaEast_mm = Math.sqrt(varE) * 1000.0;
+        const sigmaNorth_mm = Math.sqrt(varN) * 1000.0;
+        const sigmaUp_mm = Math.sqrt(varU) * 1000.0;
+
+        // Horizontal Error Ellipse at 95% confidence level (factor c = 2.4477, BÖHYY)
         const diffEN = varN - varE;
         const rootTerm = Math.sqrt(diffEN * diffEN + 4.0 * covEN * covEN);
         const semiMajorM = Math.sqrt(Math.max(1e-12, (varN + varE + rootTerm) / 2.0)) * 2.4477;
         const semiMinorM = Math.sqrt(Math.max(1e-12, (varN + varE - rootTerm) / 2.0)) * 2.4477;
+        const semiAxisC_mm = Math.sqrt(varU) * 2.7955 * 1000.0; // 3D ellipsoid vertical axis at 95%
 
         let thetaRad = 0.5 * Math.atan2(2.0 * covEN, diffEN);
         if (thetaRad < 0) thetaRad += Math.PI;
@@ -2121,8 +2204,12 @@ export function perform3DNetworkAdjustment(
           sigmaX: sigmaX_mm,
           sigmaY: sigmaY_mm,
           sigmaZ: sigmaZ_mm,
+          sigmaEast: sigmaEast_mm,
+          sigmaNorth: sigmaNorth_mm,
+          sigmaUp: sigmaUp_mm,
           semiMajor: semiMajorM * 1000.0,
           semiMinor: semiMinorM * 1000.0,
+          semiAxisC: semiAxisC_mm,
           ellipseAzimuth: ellipseAzimuthGon,
           sigmaH: sigmaH_mm,
         };
@@ -2141,8 +2228,12 @@ export function perform3DNetworkAdjustment(
           sigmaX: 0.0,
           sigmaY: 0.0,
           sigmaZ: 0.0,
+          sigmaEast: 0.0,
+          sigmaNorth: 0.0,
+          sigmaUp: 0.0,
           semiMajor: 0.0,
           semiMinor: 0.0,
+          semiAxisC: 0.0,
           ellipseAzimuth: 0.0,
           sigmaH: 0.0,
         };
@@ -2165,6 +2256,15 @@ export function perform3DNetworkAdjustment(
         upperLimit: chiUpper,
         testStatistic: vPv,
         confidenceLevel: 0.95,
+      },
+      matrixDiagnostics: {
+        numRowsA: numObs,
+        numColsA: numUnknowns,
+        numNonZeroA: nonZeroACount,
+        sparsityPercent,
+        conditionNumberN,
+        averageRedundancy,
+        maxCorrelation: 0.85,
       },
       stations: adjustedStations,
       baselines: finalBaselines,

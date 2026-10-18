@@ -21,6 +21,7 @@ import {
   generateBaselinesFromStations,
   runFullTopconWorkflow,
 } from './utils/geodesy';
+import { batchProcessNetworkBaselines } from './utils/rtklibEngine';
 
 import { JobConfigTab } from './components/JobConfigTab';
 import { StationsAntennaTab } from './components/StationsAntennaTab';
@@ -28,6 +29,7 @@ import { BaselinesTab } from './components/BaselinesTab';
 import { LoopClosureTab } from './components/LoopClosureTab';
 import { AdjustmentTab } from './components/AdjustmentTab';
 import { ConstrainedAdjustmentTab } from './components/ConstrainedAdjustmentTab';
+import { QcSkyplotTab } from './components/QcSkyplotTab';
 import { MapTab } from './components/MapTab';
 import { ReportExportTab } from './components/ReportExportTab';
 import { HomeTab } from './components/HomeTab';
@@ -63,11 +65,13 @@ import {
   FolderOpen,
   ChevronLeft,
   ChevronRight,
+  Compass,
 } from 'lucide-react';
 
 type TabKey =
   | 'home'
   | 'stations'
+  | 'qc'
   | 'baselines'
   | 'loops'
   | 'free_adjustment'
@@ -76,12 +80,13 @@ type TabKey =
 
 const WORKFLOW_STEPS: { id: TabKey; title: string; subtitle: string }[] = [
   { id: 'home', title: 'Anasayfa', subtitle: 'Proje yönetimi, yeni proje başlatma ve kayıtlı projeler' },
-  { id: 'stations', title: 'Veri Girişi', subtitle: 'Proje ayarları, CORS ve RINEX nokta gözlem verileri' },
-  { id: 'baselines', title: 'Bazlar & RTKLIB', subtitle: 'Çift fark baz vektörü türetme ve RTKLIB çözümü' },
-  { id: 'loops', title: 'Loop Closure', subtitle: '3D kapalı üçgen döngüleri ve ağ haritası analizi' },
-  { id: 'free_adjustment', title: 'Serbest Dengeleme', subtitle: 'İç tutarlılık ve kaba hata (Baarda w-testi) dengelemesi' },
-  { id: 'constrained_adjustment', title: 'Dayalı Dengeleme', subtitle: 'CORS sabit koordinat yönetimi ve nihai 3D Gauss-Markov dengelemesi' },
-  { id: 'report', title: 'Rapor ve Çıktı Al', subtitle: 'Resmi BÖHYY dengeleme karnesi ve dışa aktarım' },
+  { id: 'stations', title: '1. Faz: Veri Okuma ve Ayrıştırma', subtitle: '24 saatlik RINEX .obs/.nav yükleme, koordinat ve anten yönetimi' },
+  { id: 'qc', title: '2. Faz: Görselleştirme ve Kalite Kontrol (QC)', subtitle: 'Kutupsal uydu haritası (Skyplot), maske açısı ve SNR kalite denetimi' },
+  { id: 'baselines', title: '3. Faz: Baz Vektörü Çözümü', subtitle: 'Çift fark (Double Difference) faz çözümü ve varyans-kovaryans matrisleri' },
+  { id: 'loops', title: '4. Faz: Döngü Kapanmaları', subtitle: '3D kapalı üçgen döngüleri (Loop Closure) ve BÖHYY tolerans analizi' },
+  { id: 'free_adjustment', title: '4. Faz: Serbest Dengeleme', subtitle: 'Minimal kısıtlı iç tutarlılık ve Baarda w-testi kaba hata dengelemesi' },
+  { id: 'constrained_adjustment', title: '4. Faz: Dayalı Dengeleme', subtitle: 'CORS sabit koordinat yönetimi ve nihai 3D Gauss-Markov dengelemesi' },
+  { id: 'report', title: '5. Faz: Raporlama & CAD/CBS', subtitle: 'Resmi BÖHYY dengeleme karnesi, 3D hata elipsleri, DXF, KML, GeoJSON ve Excel' },
 ];
 
 export default function App() {
@@ -265,7 +270,9 @@ export default function App() {
       showToast('Baz ağı türetmek için en az 2 nokta bulunmalıdır.');
       return;
     }
-    const generated = generateBaselinesFromStations(stations);
+    const generated = batchProcessNetworkBaselines(stations, {
+      elevationMaskDeg: config.elevationMask,
+    });
     setBaselines(generated);
     const loops = calculateLoopClosures(
       stations,
@@ -274,7 +281,7 @@ export default function App() {
       config.loopTolerancePpm
     );
     setLoopClosures(loops);
-    showToast(`${generated.length} adet çift fark baz vektörü türetildi.`);
+    showToast(`${generated.length} adet çift fark baz vektörü RTKLIB motoru ile çözüldü.`);
   };
 
   const handleDetectedSurveyEpoch = (epoch: number, dateStr?: string) => {
@@ -299,8 +306,22 @@ export default function App() {
   };
 
   const handleRunRtklibSimulation = () => {
-    showToast('RTKLIB Çift Fark çözümü yenilendi (-p 3 -m 10 -f 3).');
-    handleRecalculateLoops();
+    if (Object.keys(stations).length < 2) {
+      showToast('RTKLIB çözümü için en az 2 nokta gereklidir.');
+      return;
+    }
+    const solved = batchProcessNetworkBaselines(stations, {
+      elevationMaskDeg: config.elevationMask,
+    });
+    setBaselines(solved);
+    const loops = calculateLoopClosures(
+      stations,
+      solved,
+      config.loopToleranceBaseMm,
+      config.loopTolerancePpm
+    );
+    setLoopClosures(loops);
+    showToast(`RTKLIB Çift Fark çözümü tamamlandı: ${solved.length} baz başarıyla hesaplandı.`);
   };
 
   // Project Management Handlers
@@ -503,22 +524,34 @@ export default function App() {
             }`}
           >
             <Radio className="w-4 h-4 text-sky-600" />
-            <span>Veri Girişi</span>
+            <span>1. Faz: Veri Okuma &amp; Ayrıştırma</span>
             <span className="bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full text-[10px] font-bold">
               {stationCount}
             </span>
           </button>
 
           <button
+            onClick={() => setActiveTab('qc')}
+            className={`px-3.5 py-2.5 text-xs sm:text-sm font-semibold border-b-2 flex items-center gap-2 whitespace-nowrap transition cursor-pointer ${
+              activeTab === 'qc'
+                ? 'border-indigo-600 text-indigo-600'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <Compass className="w-4 h-4 text-indigo-600" />
+            <span>2. Faz: Görselleştirme &amp; QC</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('baselines')}
             className={`px-3.5 py-2.5 text-xs sm:text-sm font-semibold border-b-2 flex items-center gap-2 whitespace-nowrap transition cursor-pointer ${
               activeTab === 'baselines'
-                ? 'border-sky-600 text-sky-600'
+                ? 'border-emerald-600 text-emerald-600'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
             <Share2 className="w-4 h-4 text-emerald-600" />
-            <span>Bazlar & RTKLIB</span>
+            <span>3. Faz: Baz Vektörü Çözümü</span>
             <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full text-[10px] font-bold">
               {activeBaselineCount}
             </span>
@@ -528,12 +561,12 @@ export default function App() {
             onClick={() => setActiveTab('loops')}
             className={`px-3.5 py-2.5 text-xs sm:text-sm font-semibold border-b-2 flex items-center gap-2 whitespace-nowrap transition cursor-pointer ${
               activeTab === 'loops'
-                ? 'border-sky-600 text-sky-600'
+                ? 'border-amber-600 text-amber-600'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
             <RotateCcw className="w-4 h-4 text-amber-600" />
-            <span>Loop Closure</span>
+            <span>4. Faz: Döngü Kapanmaları</span>
             <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full text-[10px] font-bold">
               {loopClosures.length}
             </span>
@@ -548,7 +581,7 @@ export default function App() {
             }`}
           >
             <Sliders className="w-4 h-4 text-purple-600" />
-            <span>Serbest Dengeleme</span>
+            <span>4. Faz: Serbest Dengeleme</span>
             {unconstrainedResult && (
               <span
                 className={`w-2 h-2 rounded-full ${
@@ -567,7 +600,7 @@ export default function App() {
             }`}
           >
             <ShieldCheck className="w-4 h-4 text-indigo-600" />
-            <span>Dayalı Dengeleme</span>
+            <span>4. Faz: Dayalı Dengeleme</span>
             {constrainedResult && (
               <span
                 className={`w-2 h-2 rounded-full ${
@@ -581,12 +614,12 @@ export default function App() {
             onClick={() => setActiveTab('report')}
             className={`px-3.5 py-2.5 text-xs sm:text-sm font-semibold border-b-2 flex items-center gap-2 whitespace-nowrap transition cursor-pointer ${
               activeTab === 'report'
-                ? 'border-sky-600 text-sky-600'
+                ? 'border-rose-600 text-rose-600'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
-            <FileText className="w-4 h-4 text-orange-600" />
-            <span>Rapor ve Çıktı Al</span>
+            <FileText className="w-4 h-4 text-rose-600" />
+            <span>5. Faz: Raporlama &amp; CAD/CBS</span>
           </button>
         </div>
 
@@ -616,6 +649,20 @@ export default function App() {
             onDeleteStation={handleDeleteStation}
             onClearAllStations={handleClearAllStations}
             onDetectedSurveyEpoch={handleDetectedSurveyEpoch}
+            onNavigateToQcTab={(stnId) => {
+              if (stnId) setSelectedOccupationStationId(stnId);
+              setActiveTab('qc');
+            }}
+          />
+        )}
+
+        {activeTab === 'qc' && (
+          <QcSkyplotTab
+            stations={stations}
+            elevationMask={config.elevationMask}
+            selectedStationId={selectedOccupationStationId}
+            onSelectStation={(id) => setSelectedOccupationStationId(id)}
+            onOpenRinexModal={() => setActiveTab('stations')}
           />
         )}
 
@@ -661,6 +708,7 @@ export default function App() {
             onRunAdjustment={handleRunAdjustment}
             onExcludeOutliersAndReAdjust={handleExcludeOutliersAndReAdjust}
             isLoading={isLoading}
+            onNavigateToReport={() => setActiveTab('report')}
           />
         )}
 
@@ -689,17 +737,17 @@ export default function App() {
                     className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg shadow-2xs transition cursor-pointer active:scale-95"
                   >
                     <ChevronLeft className="w-4 h-4 text-slate-600" />
-                    <span>Önceki Adım: {prevStep.title}</span>
+                    <span>Önceki: {prevStep.title}</span>
                   </button>
                 ) : (
                   <div className="text-xs text-slate-400 font-semibold px-2">
-                    1. Adım / Başlangıç
+                    Başlangıç
                   </div>
                 )}
               </div>
 
               <div className="text-xs text-slate-500 font-medium text-center">
-                Adım {currentStepIndex + 1} / {WORKFLOW_STEPS.length}:{' '}
+                Aşama {currentStepIndex + 1} / {WORKFLOW_STEPS.length}:{' '}
                 <span className="font-bold text-slate-800">{WORKFLOW_STEPS[currentStepIndex]?.title}</span>
               </div>
 
@@ -710,7 +758,7 @@ export default function App() {
                     onClick={() => setActiveTab(nextStep.id)}
                     className="inline-flex items-center gap-2 px-5 py-2.5 text-xs sm:text-sm font-bold text-white bg-sky-600 hover:bg-sky-700 rounded-lg shadow-sm hover:shadow transition cursor-pointer active:scale-95"
                   >
-                    <span>Sonraki Adıma Geç ({nextStep.title})</span>
+                    <span>Sonraki: {nextStep.title}</span>
                     <ChevronRight className="w-4 h-4 text-white" />
                   </button>
                 ) : (

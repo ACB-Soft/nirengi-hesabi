@@ -5,8 +5,9 @@
  * Modül 5: 3D Gauss-Markov En Küçük Kareler Ağ Dengelemesi ve Baarda Data Snooping (F8)
  */
 
-import React, { useState } from 'react';
+import React from 'react';
 import { AdjustmentResult, JobConfig } from '../types/gnss';
+import { NetworkAdjustmentResultsView } from './NetworkAdjustmentResultsView';
 import {
   BarChart3,
   CheckCircle2,
@@ -38,8 +39,6 @@ export const AdjustmentTab: React.FC<Props> = ({
   onExcludeOutliersAndReAdjust,
   isLoading,
 }) => {
-  const [selectedSubTab, setSelectedSubTab] = useState<'coords' | 'residuals' | 'ellipses'>('coords');
-
   const isFree = mode === 'unconstrained';
 
   return (
@@ -56,10 +55,10 @@ export const AdjustmentTab: React.FC<Props> = ({
                     : 'bg-sky-100 text-sky-800 border-sky-300'
                 }`}
               >
-                {isFree ? 'Minimal Kısıtlı / İç Tutarlılık' : 'Tam Kısıtlı / CORS Sabit'}
+                {isFree ? '4. Faz: Serbest Dengeleme' : '4. Faz: Dayalı Dengeleme'}
               </span>
               <h2 className="text-base font-bold text-slate-900">
-                {isFree ? 'Serbest (Zorlamasız) Ağ Dengelemesi' : 'Dayalı (Tam Kısıtlı) Ağ Dengelemesi'}
+                {isFree ? '4. Faz: Serbest (İç Tutarlılık) Ağ Dengelemesi' : '4. Faz: Dayalı (Tam Kısıtlı) Ağ Dengelemesi'}
               </h2>
             </div>
             <p className="text-xs text-slate-500 mt-1">
@@ -89,7 +88,7 @@ export const AdjustmentTab: React.FC<Props> = ({
         {adjustmentResult && (
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-4 pt-4 border-t border-slate-100 text-xs">
             <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
-              <div className="text-slate-500">Birim Ölçü Standart Hatası (sigma_0)</div>
+              <div className="text-slate-500">Birim Ölçü St. Hatası (σ₀)</div>
               <div className="text-base font-bold font-mono text-slate-900 mt-0.5">
                 {adjustmentResult.sigma0Aposteriori.toFixed(4)}
               </div>
@@ -161,216 +160,15 @@ export const AdjustmentTab: React.FC<Props> = ({
         )}
       </div>
 
-      {/* Main Results Container */}
+      {/* Main Results View */}
       {adjustmentResult && (
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-4">
-          {/* Sub Navigation */}
-          <div className="flex border-b border-slate-200 space-x-4 text-xs font-bold">
-            <button
-              onClick={() => setSelectedSubTab('coords')}
-              className={`py-2 border-b-2 cursor-pointer transition ${
-                selectedSubTab === 'coords'
-                  ? 'border-sky-600 text-sky-600'
-                  : 'border-transparent text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Dengelenmiş Koordinatlar ({Object.keys(adjustmentResult.stations).length} Nokta)
-            </button>
-            <button
-              onClick={() => setSelectedSubTab('residuals')}
-              className={`py-2 border-b-2 cursor-pointer transition ${
-                selectedSubTab === 'residuals'
-                  ? 'border-sky-600 text-sky-600'
-                  : 'border-transparent text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Baz Düzeltmeleri ve Baarda w-Testi ({adjustmentResult.baselines.length} Baz)
-            </button>
-            <button
-              onClick={() => setSelectedSubTab('ellipses')}
-              className={`py-2 border-b-2 cursor-pointer transition ${
-                selectedSubTab === 'ellipses'
-                  ? 'border-sky-600 text-sky-600'
-                  : 'border-transparent text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              %95 Güven Aralıklı Hata Elipsleri & Duyarlık
-            </button>
-          </div>
-
-          {/* SubTab 1: Coordinates */}
-          {selectedSubTab === 'coords' && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
-                    <th className="py-2.5 px-3">Nokta ID</th>
-                    <th className="py-2.5 px-3">Durum</th>
-                    <th className="py-2.5 px-3 text-right">Dengelenmiş X (m)</th>
-                    <th className="py-2.5 px-3 text-right">Dengelenmiş Y (m)</th>
-                    <th className="py-2.5 px-3 text-right">Dengelenmiş Z (m)</th>
-                    <th className="py-2.5 px-3 text-right">TM Sağa Y (m)</th>
-                    <th className="py-2.5 px-3 text-right">TM Yukarı X (m)</th>
-                    <th className="py-2.5 px-3 text-right">Elip. H (m)</th>
-                    <th className="py-2.5 px-3 text-right">σ_X (mm)</th>
-                    <th className="py-2.5 px-3 text-right">σ_Y (mm)</th>
-                    <th className="py-2.5 px-3 text-right">σ_Z (mm)</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 font-mono">
-                  {Object.values(adjustmentResult.stations).map((st) => {
-                    const isFixed = st.isFixed.x && st.isFixed.y && st.isFixed.z;
-                    return (
-                      <tr key={st.id} className="hover:bg-slate-50">
-                        <td className="py-2.5 px-3 font-bold font-sans text-slate-900">{st.name}</td>
-                        <td className="py-2.5 px-3 font-sans">
-                          <span
-                            className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                              isFixed ? 'bg-rose-100 text-rose-800' : 'bg-emerald-100 text-emerald-800'
-                            }`}
-                          >
-                            {isFixed ? 'SABİT (CORS)' : 'DENGELENDİ'}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3 text-right text-slate-700">
-                          {(st.adjustedX ?? st.x).toFixed(4)}
-                        </td>
-                        <td className="py-2.5 px-3 text-right text-slate-700">
-                          {(st.adjustedY ?? st.y).toFixed(4)}
-                        </td>
-                        <td className="py-2.5 px-3 text-right text-slate-700">
-                          {(st.adjustedZ ?? st.z).toFixed(4)}
-                        </td>
-                        <td className="py-2.5 px-3 text-right font-bold text-sky-800">
-                          {(st.adjustedProjY ?? st.projY).toFixed(4)}
-                        </td>
-                        <td className="py-2.5 px-3 text-right font-bold text-sky-800">
-                          {(st.adjustedProjX ?? st.projX).toFixed(4)}
-                        </td>
-                        <td className="py-2.5 px-3 text-right font-bold text-slate-900">
-                          {(st.adjustedH ?? st.h).toFixed(4)}
-                        </td>
-                        <td className="py-2.5 px-3 text-right text-slate-600">
-                          {(st.sigmaX ?? 0).toFixed(1)}
-                        </td>
-                        <td className="py-2.5 px-3 text-right text-slate-600">
-                          {(st.sigmaY ?? 0).toFixed(1)}
-                        </td>
-                        <td className="py-2.5 px-3 text-right text-slate-600">
-                          {(st.sigmaZ ?? 0).toFixed(1)}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* SubTab 2: Residuals and Baarda w-test */}
-          {selectedSubTab === 'residuals' && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
-                    <th className="py-2.5 px-3">Baz ID</th>
-                    <th className="py-2.5 px-3">Hat</th>
-                    <th className="py-2.5 px-3 text-right">Uzunluk (m)</th>
-                    <th className="py-2.5 px-3 text-right">vX (mm)</th>
-                    <th className="py-2.5 px-3 text-right">vY (mm)</th>
-                    <th className="py-2.5 px-3 text-right">vZ (mm)</th>
-                    <th className="py-2.5 px-3 text-right">v_Mekan (mm)</th>
-                    <th className="py-2.5 px-3 text-right">Baarda w-Testi</th>
-                    <th className="py-2.5 px-3 text-center">Değerlendirme</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 font-mono">
-                  {adjustmentResult.baselines.map((b) => {
-                    const isOutlier = b.isOutlier;
-                    return (
-                      <tr key={b.id} className={`hover:bg-slate-50 ${isOutlier ? 'bg-rose-50/50' : ''}`}>
-                        <td className="py-2.5 px-3 font-bold font-sans text-slate-900">{b.id}</td>
-                        <td className="py-2.5 px-3 font-sans text-slate-800">
-                          {b.fromId} $\rightarrow$ {b.toId}
-                        </td>
-                        <td className="py-2.5 px-3 text-right text-slate-700">{b.length.toFixed(2)}</td>
-                        <td className="py-2.5 px-3 text-right text-slate-600">{(b.vX ?? 0).toFixed(1)}</td>
-                        <td className="py-2.5 px-3 text-right text-slate-600">{(b.vY ?? 0).toFixed(1)}</td>
-                        <td className="py-2.5 px-3 text-right text-slate-600">{(b.vZ ?? 0).toFixed(1)}</td>
-                        <td className="py-2.5 px-3 text-right font-bold text-slate-900">
-                          {(b.spatialV ?? 0).toFixed(1)}
-                        </td>
-                        <td className="py-2.5 px-3 text-right font-bold">
-                          <span className={isOutlier ? 'text-rose-700' : 'text-slate-800'}>
-                            {(b.wTest ?? 0).toFixed(2)}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3 text-center font-sans">
-                          <span
-                            className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                              isOutlier ? 'bg-rose-100 text-rose-800' : 'bg-emerald-100 text-emerald-800'
-                            }`}
-                          >
-                            {isOutlier ? 'KABA HATA!' : 'NORMAL'}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* SubTab 3: Error Ellipses (a, b, theta, sigma_H at 95%) */}
-          {selectedSubTab === 'ellipses' && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
-                    <th className="py-2.5 px-3">Nokta ID</th>
-                    <th className="py-2.5 px-3 text-right">Büyük Yarı Eksen a (mm)</th>
-                    <th className="py-2.5 px-3 text-right">Küçük Yarı Eksen b (mm)</th>
-                    <th className="py-2.5 px-3 text-right">Elips Basıklığı (a / b)</th>
-                    <th className="py-2.5 px-3 text-right">Azimut θ (Gon)</th>
-                    <th className="py-2.5 px-3 text-right">Düşey Duyarlık σ_H (mm)</th>
-                    <th className="py-2.5 px-3 text-center">BÖHYY Uygunluğu</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 font-mono">
-                  {Object.values(adjustmentResult.stations).map((st) => {
-                    const isFixed = st.isFixed.x && st.isFixed.y && st.isFixed.z;
-                    const a = st.semiMajor ?? 0;
-                    const b = st.semiMinor ?? 0;
-                    const ratio = b > 0 ? (a / b).toFixed(2) : '-';
-                    return (
-                      <tr key={st.id} className="hover:bg-slate-50">
-                        <td className="py-2.5 px-3 font-bold font-sans text-slate-900">{st.name}</td>
-                        <td className="py-2.5 px-3 text-right font-bold text-sky-800">
-                          {isFixed ? '0.0 (Sabit)' : a.toFixed(1)}
-                        </td>
-                        <td className="py-2.5 px-3 text-right text-slate-700">
-                          {isFixed ? '0.0 (Sabit)' : b.toFixed(1)}
-                        </td>
-                        <td className="py-2.5 px-3 text-right text-slate-600">{isFixed ? '-' : ratio}</td>
-                        <td className="py-2.5 px-3 text-right text-slate-700">
-                          {isFixed ? '-' : (st.ellipseAzimuth ?? 0).toFixed(2)}
-                        </td>
-                        <td className="py-2.5 px-3 text-right font-bold text-slate-900">
-                          {isFixed ? '0.0' : (st.sigmaH ?? 0).toFixed(1)}
-                        </td>
-                        <td className="py-2.5 px-3 text-center font-sans">
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                            {isFixed ? 'REFERANS' : '< 30 mm (UYGUN)'}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+          <NetworkAdjustmentResultsView
+            adjustmentResult={adjustmentResult}
+            config={config}
+            mode={mode}
+            onExcludeOutliersAndReAdjust={onExcludeOutliersAndReAdjust}
+          />
         </div>
       )}
 

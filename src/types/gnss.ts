@@ -175,8 +175,12 @@ export interface Station {
   sigmaZ?: number; // mm
   semiMajor?: number; // mm (2D error ellipse 'a' at 95% confidence)
   semiMinor?: number; // mm (2D error ellipse 'b' at 95% confidence)
+  semiAxisC?: number; // mm (3D error ellipsoid vertical semi-axis 'c' at 95% confidence)
   ellipseAzimuth?: number; // Gon or Deg
   sigmaH?: number; // mm (height standard deviation at 95% confidence)
+  sigmaEast?: number; // mm (1-sigma East)
+  sigmaNorth?: number; // mm (1-sigma North)
+  sigmaUp?: number; // mm (1-sigma Up)
 }
 
 export interface BaselineVector {
@@ -208,6 +212,7 @@ export interface BaselineVector {
   vZ?: number; // residual in mm
   spatialV?: number; // mm
   wTest?: number; // Baarda w-test statistic
+  redundancyNumber?: number; // r_i redundancy number (0 to 1)
   isOutlier?: boolean;
   excluded?: boolean;
 }
@@ -230,6 +235,16 @@ export interface LoopClosure {
   isAccepted: boolean;
 }
 
+export interface MatrixDiagnostics {
+  numRowsA: number;
+  numColsA: number;
+  numNonZeroA: number;
+  sparsityPercent: number;
+  conditionNumberN: number;
+  averageRedundancy: number;
+  maxCorrelation: number;
+}
+
 export interface AdjustmentResult {
   mode: AdjustmentMode;
   fixedStationIds: string[];
@@ -247,6 +262,7 @@ export interface AdjustmentResult {
     testStatistic: number;
     confidenceLevel: number; // 0.95
   };
+  matrixDiagnostics?: MatrixDiagnostics;
   stations: Record<string, Station>;
   baselines: BaselineVector[];
   outliers: string[]; // baseline IDs flagged by Baarda snooping
@@ -367,4 +383,49 @@ export interface IgsSp3File {
   satelliteCount: number;
   satellites: string[];
   productType: 'FINAL' | 'RAPID' | 'ULTRA_RAPID';
+}
+
+export interface RinexHeaderMetadata {
+  fileName: string;
+  fileSizeBytes: number;
+  rinexVersion: string;
+  fileType: 'OBSERVATION' | 'NAVIGATION' | 'METEOROLOGICAL' | 'UNKNOWN';
+  satelliteSystem: 'GPS' | 'GLONASS' | 'Galileo' | 'BeiDou' | 'Mixed' | string;
+  markerName: string;
+  markerNumber?: string;
+  observer?: string;
+  agency?: string;
+  receiverNumber?: string;
+  receiverType?: string;
+  receiverVersion?: string;
+  antennaNumber?: string;
+  antennaType?: string;
+  antennaRadome?: string;
+  approxX: number;
+  approxY: number;
+  approxZ: number;
+  deltaH: number;
+  deltaE: number;
+  deltaN: number;
+  firstObsTime?: string;
+  lastObsTime?: string;
+  surveyEpoch?: number;
+  intervalSec?: number;
+  leapSeconds?: number;
+  obsTypesBySystem: Record<string, string[]>;
+  warnings: string[];
+}
+
+export interface RinexParsedSummary {
+  metadata: RinexHeaderMetadata;
+  occupation?: RinexOccupation;
+  storedOpfsKey?: string;
+  detectedPointType: StationType;
+  geodeticApprox: {
+    lat: number;
+    lon: number;
+    h: number;
+    projY: number;
+    projX: number;
+  };
 }
