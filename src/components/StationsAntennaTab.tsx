@@ -47,7 +47,6 @@ import {
   matchAntennaInNoaaCatalog,
 } from '../data/noaaAntcal';
 import { OccupationViewTab } from './OccupationViewTab';
-import { RinexIngestionModal } from './RinexIngestionModal';
 import { parseRinexFile, createStationFromSummary } from '../utils/rinexStreamParser';
 import { saveRinexFileToOpfs } from '../utils/opfsStorage';
 import {
@@ -72,7 +71,6 @@ import {
   Database,
   Info,
   FileCode,
-  ExternalLink,
   Sparkles,
   Table,
   FileSpreadsheet,
@@ -124,9 +122,6 @@ export const StationsAntennaTab: React.FC<Props> = ({
   const corsStations = useMemo(() => sortedStations.filter((s) => s.type === 'CORS' || (s.isFixed.x && s.isFixed.y && s.isFixed.z)), [sortedStations]);
 
   const [uploadFeedback, setUploadFeedback] = useState<string | null>(null);
-
-  // Advanced Offline RINEX Ingestion Modal State (Phase 1)
-  const [isRinexModalOpen, setIsRinexModalOpen] = useState(false);
 
   // Popup Modal States
   const [occupationModalStationId, setOccupationModalStationId] = useState<string | null>(null);
@@ -667,14 +662,6 @@ export const StationsAntennaTab: React.FC<Props> = ({
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            <button
-              onClick={() => setIsRinexModalOpen(true)}
-              className="px-3.5 py-2 text-xs font-bold bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-700 hover:to-indigo-700 text-white rounded-lg shadow-xs transition cursor-pointer flex items-center gap-1.5"
-              title="Çevrimdışı RINEX Veri İçe Aktarma & OPFS Depo Yöneticisi"
-            >
-              <Radio className="w-3.5 h-3.5 text-sky-200 animate-pulse" />
-              <span>Çevrimdışı RINEX İçe Aktar</span>
-            </button>
 
             {sortedStations.length > 0 && (
               <>
@@ -869,103 +856,19 @@ export const StationsAntennaTab: React.FC<Props> = ({
             </label>
             {igsOrbitInfo && (
               <a
-                href={igsOrbitInfo.ignUrl}
+                href={igsOrbitInfo.cddisUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="py-2 px-2.5 text-[11px] font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 rounded-lg transition inline-flex items-center gap-1"
-                title={`IGN (Açık Erişim) IGS ${igsOrbitInfo.productName} indir`}
+                className="py-2 px-2.5 text-[11px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg transition inline-flex items-center gap-1"
+                title={`NASA EarthData (CDDIS) ${igsOrbitInfo.productName} indir`}
               >
-                <Download className="w-3 h-3 text-emerald-700" />
-                <span>İndir (IGN)</span>
+                <Download className="w-3 h-3 text-amber-700" />
+                <span>EarthData İndir</span>
               </a>
             )}
           </div>
         </div>
       </div>
-
-      {/* IGS Orbit Info Detail Box (if detected) */}
-      {igsOrbitInfo && (
-        <div className="bg-linear-to-r from-slate-900 to-slate-800 text-white rounded-xl p-4 shadow-sm border border-slate-700 space-y-3 text-xs">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2 flex-wrap">
-                <Satellite className="w-4 h-4 text-sky-400 shrink-0" />
-                <span className="font-bold text-white text-sm font-mono break-all">
-                  {igsOrbitInfo.productName}
-                </span>
-                <span className="px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 text-[10px] font-mono border border-sky-400/30">
-                  GPS Hafta: {igsOrbitInfo.gpsWeek}-{igsOrbitInfo.dayOfWeek} (DOY: {igsOrbitInfo.doy})
-                </span>
-                <span className="px-2 py-0.5 rounded bg-slate-700 text-slate-300 text-[10px] font-mono border border-slate-600">
-                  Eski 8.3 Kodu: {igsOrbitInfo.legacyName}
-                </span>
-              </div>
-              <p className="text-slate-300 text-[11px]">
-                {igsOrbitInfo.recommendationText} &bull; Hassasiyet: <strong className="text-emerald-400">{igsOrbitInfo.accuracyEstimate}</strong>
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2 flex-wrap">
-              {/* IGN France: Open Public Mirror - No Earthdata login required */}
-              <a
-                href={igsOrbitInfo.ignUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 shadow-xs transition"
-                title="IGN Fransa Açık Sunucusu: Üyelik veya giriş gerektirmeden tek tıkla doğrudan indirir"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>IGN (Doğrudan İndir)</span>
-              </a>
-
-              {/* BKG Germany: Open Public Mirror - No login required */}
-              <a
-                href={igsOrbitInfo.bkgUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 rounded-lg text-[11px] font-semibold flex items-center gap-1 transition"
-                title="BKG Almanya Açık Sunucusu"
-              >
-                <span>BKG (Almanya)</span>
-                <ExternalLink className="w-3 h-3 text-slate-400" />
-              </a>
-
-              {/* CDDIS NASA: Requires Earthdata Login */}
-              <a
-                href={igsOrbitInfo.cddisUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 rounded-lg text-[11px] font-semibold flex items-center gap-1 transition"
-                title="NASA CDDIS: Earthdata üyeliği ile giriş yapılarak indirilir"
-              >
-                <span>CDDIS (NASA Earthdata)</span>
-                <ExternalLink className="w-3 h-3 text-slate-400" />
-              </a>
-
-              {/* CDDIS Week Folder */}
-              <a
-                href={igsOrbitInfo.cddisFolderUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="px-2.5 py-1.5 bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg text-[10px] flex items-center gap-1 transition"
-                title={`Hafta ${igsOrbitInfo.gpsWeek} dizinini görüntüle`}
-              >
-                <span>Hafta {igsOrbitInfo.gpsWeek} Dizini</span>
-                <ExternalLink className="w-2.5 h-2.5 text-slate-400" />
-              </a>
-            </div>
-          </div>
-
-          <div className="pt-2 border-t border-slate-700/60 text-[11px] text-slate-300 flex items-start gap-1.5">
-            <span className="font-bold text-amber-400 shrink-0">Bilgi:</span>
-            <span>
-              IGS, GPS 2238. haftasından (Kasım 2022) sonra eski <code>igs{igsOrbitInfo.gpsWeek}{igsOrbitInfo.dayOfWeek}.sp3.Z</code> adlandırmasını sonlandırarak 
-              modern RINEX 3 uzun adlandırma formatına (<code>{igsOrbitInfo.productName}</code>) geçmiştir. 
-              İndirdiğiniz <strong>.gz</strong> dosyasını arşivden çıkarmadan doğrudan <strong>.SP3 / .gz Yükle</strong> butonuyla sisteme aktarabilirsiniz (tarayıcı içinde otomatik açılır).
-            </span>
-          </div>
-        </div>
-      )}
 
       {/* Empty State */}
       {sortedStations.length === 0 ? (
@@ -982,14 +885,7 @@ export const StationsAntennaTab: React.FC<Props> = ({
           </div>
 
           <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
-            <button
-              onClick={() => setIsRinexModalOpen(true)}
-              className="px-5 py-2.5 text-xs font-bold bg-gradient-to-r from-sky-600 via-indigo-600 to-sky-700 hover:opacity-95 text-white rounded-xl shadow-sm transition cursor-pointer inline-flex items-center gap-2"
-            >
-              <Radio className="w-4 h-4 text-sky-200 animate-pulse" />
-              <span>Gelişmiş Çevrimdışı RINEX İçe Aktar (Faz 1)</span>
-            </button>
-            <label className="px-5 py-2.5 text-xs font-bold bg-sky-600 hover:bg-sky-700 text-white rounded-xl shadow-sm transition cursor-pointer inline-flex items-center gap-2">
+            <label className="px-5 py-2.5 text-xs font-bold bg-sky-600 hover:bg-sky-700 text-white rounded-xl shadow-xs transition cursor-pointer inline-flex items-center gap-2">
               <Upload className="w-4 h-4" />
               <span>Dengelenecek Rover Yükle</span>
               <input
@@ -1000,7 +896,7 @@ export const StationsAntennaTab: React.FC<Props> = ({
                 className="hidden"
               />
             </label>
-            <label className="px-5 py-2.5 text-xs font-bold bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl shadow-sm transition cursor-pointer inline-flex items-center gap-2">
+            <label className="px-5 py-2.5 text-xs font-bold bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl shadow-xs transition cursor-pointer inline-flex items-center gap-2">
               <ShieldCheck className="w-4 h-4" />
               <span>TUSAGA Sabit Yükle</span>
               <input
@@ -2283,25 +2179,6 @@ export const StationsAntennaTab: React.FC<Props> = ({
           </div>
         </div>
       )}
-
-      {/* ========================================================================= */}
-      {/* 4. ADVANCED OFFLINE RINEX INGESTION & OPFS MODAL (FAZ 1) */}
-      {/* ========================================================================= */}
-      <RinexIngestionModal
-        isOpen={isRinexModalOpen}
-        onClose={() => setIsRinexModalOpen(false)}
-        dom={dom}
-        surveyEpoch={surveyEpoch}
-        onAddStation={onAddStation}
-        onDetectedSurveyEpoch={onDetectedSurveyEpoch}
-        onNavigateToOccupationView={(stnId) => {
-          if (onNavigateToQcTab) {
-            onNavigateToQcTab(stnId);
-          } else {
-            setOccupationModalStationId(stnId);
-          }
-        }}
-      />
     </div>
   );
 };
