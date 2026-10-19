@@ -93,6 +93,7 @@ interface Props {
   onClearAllStations: () => void;
   onDetectedSurveyEpoch?: (epoch: number, dateStr?: string) => void;
   onNavigateToQcTab?: (stnId?: string) => void;
+  onNavigateTab?: (tab: string) => void;
 }
 
 export const StationsAntennaTab: React.FC<Props> = ({
@@ -109,6 +110,7 @@ export const StationsAntennaTab: React.FC<Props> = ({
   onClearAllStations,
   onDetectedSurveyEpoch,
   onNavigateToQcTab,
+  onNavigateTab,
 }) => {
   const [isConfigOpen, setIsConfigOpen] = useState(false);
   // Sort stations alphabetically by name
@@ -143,7 +145,6 @@ export const StationsAntennaTab: React.FC<Props> = ({
 
   // Velocity Modal State
   const [isVelocityModalOpen, setIsVelocityModalOpen] = useState(false);
-  const [isVelocityReportModalOpen, setIsVelocityReportModalOpen] = useState(false);
   const [editingVelocityStationId, setEditingVelocityStationId] = useState<string | null>(null);
   const [tempVx, setTempVx] = useState<number>(-0.015);
   const [tempVy, setTempVy] = useState<number>(-0.0218);
@@ -665,23 +666,16 @@ export const StationsAntennaTab: React.FC<Props> = ({
 
             {sortedStations.length > 0 && (
               <>
-                <button
-                  onClick={() => setIsVelocityReportModalOpen(true)}
-                  className="px-3 py-2 text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-300 rounded-lg transition cursor-pointer flex items-center gap-1.5"
-                  title="Hız hesabı ve epok öteleme raporunu incele ve doğrula"
-                >
-                  <TrendingUp className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>Hız Hesabı Tablosu</span>
-                </button>
-
-                <button
-                  onClick={handleExportVelocityExcel}
-                  className="px-3 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-xs transition cursor-pointer flex items-center gap-1.5"
-                  title="Hız hesabı raporunu resmi Excel (.xlsx) formatında indir"
-                >
-                  <FileSpreadsheet className="w-3.5 h-3.5" />
-                  <span>Hız Hesabı Excel (.xlsx)</span>
-                </button>
+                {onNavigateTab && corsStations.length > 0 && (
+                  <button
+                    onClick={() => onNavigateTab('constrained_adjustment')}
+                    className="px-3 py-2 text-xs font-semibold bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-300 rounded-lg transition cursor-pointer flex items-center gap-1.5"
+                    title="TUSAGA onaylı epok hızları ve dayalı dengeleme menüsüne git"
+                  >
+                    <TrendingUp className="w-3.5 h-3.5 text-purple-600" />
+                    <span>Dayalı Dengeleme &amp; Hızlar &rarr;</span>
+                  </button>
+                )}
 
                 <button
                   onClick={onClearAllStations}
@@ -712,8 +706,8 @@ export const StationsAntennaTab: React.FC<Props> = ({
         )}
       </div>
 
-      {/* 4 Main Action Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* 3 Main Action Cards Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Card 1: Dengelenecek Noktalar (Rover) */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex flex-col justify-between hover:border-sky-300 transition">
           <div className="space-y-2">
@@ -782,43 +776,12 @@ export const StationsAntennaTab: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* Card 3: TUSAGA 2005 Epok Hız Bilgileri */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex flex-col justify-between hover:border-purple-300 transition">
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="w-8 h-8 rounded-lg bg-purple-100 text-purple-700 flex items-center justify-center font-bold text-xs">
-                3
-              </span>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
-                2005.00 → {surveyEpoch.toFixed(2)}
-              </span>
-            </div>
-            <div>
-              <h3 className="text-xs font-bold text-slate-900">TUSAGA Onaylı Epok Hızları</h3>
-              <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
-                TUSAGA-Aktif resmi istasyon karnesindeki onaylı $V_x, V_y, V_z$ (veya $V_e, V_n, V_u$) hızları.
-              </p>
-            </div>
-          </div>
-
-          <div className="pt-3 mt-3 border-t border-slate-100 flex items-center gap-1.5">
-            <button
-              onClick={() => handleOpenVelocityModal()}
-              className="flex-1 py-2 px-2 text-[11px] font-bold bg-purple-700 hover:bg-purple-800 text-white rounded-lg shadow-xs transition cursor-pointer flex items-center justify-center gap-1.5 text-center"
-              title="Resmi istasyon karnesinden onaylı hız değerlerini manuel veya toplu olarak giriniz"
-            >
-              <TrendingUp className="w-3.5 h-3.5" />
-              <span>Onaylı Hızları Gir / Düzenle</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Card 4: IGS Hassas Yörünge (.SP3) ve Uydu Saatleri (.CLK) */}
+        {/* Card 3: IGS Hassas Yörünge (.SP3) ve Uydu Saatleri (.CLK) */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex flex-col justify-between hover:border-amber-300 transition">
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <span className="w-8 h-8 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center font-bold text-xs">
-                4
+                3
               </span>
               <span
                 className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
@@ -911,136 +874,6 @@ export const StationsAntennaTab: React.FC<Props> = ({
         </div>
       ) : (
         <>
-          {/* TUSAGA Sabit Noktaları — 2005.00 → Ölçü / Dengeleme Epoğu (t) Koordinat ve Hız Tablosu */}
-          {corsStations.length > 0 && (
-            <div className="w-full bg-white rounded-xl shadow-sm border border-purple-200 p-5 space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-purple-100 pb-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <ShieldCheck className="w-5 h-5 text-purple-600" />
-                    <h3 className="text-sm font-bold text-slate-900">
-                      TUSAGA Sabit Noktaları — Epok Koordinat Tablosu (t = {surveyEpoch.toFixed(2)})
-                    </h3>
-                  </div>
-                  <p className="text-xs text-slate-500 mt-1">
-                    2005.00 referans epoğundan ölçü epoğuna (t = {surveyEpoch.toFixed(2)}) ötelenmiş ECEF, Coğrafi ve TM koordinatları.
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2 flex-wrap">
-                  <button
-                    type="button"
-                    onClick={() => setIsVelocityReportModalOpen(true)}
-                    className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-300 rounded-lg text-xs font-bold shadow-2xs transition flex items-center gap-1.5 cursor-pointer"
-                    title="BÖHYY standartlarında hız hesabı tablosu ve doğrulama raporu"
-                  >
-                    <TrendingUp className="w-3.5 h-3.5 text-indigo-600" />
-                    <span>Hız Hesabı Tablosu</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleExportVelocityExcel}
-                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-xs transition flex items-center gap-1.5 cursor-pointer"
-                    title="Resmi Hız Hesabı Excel (.xlsx) dosyasını indir"
-                  >
-                    <FileSpreadsheet className="w-3.5 h-3.5" />
-                    <span>Hız Hesabı Excel (.xlsx)</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleOpenVelocityModal()}
-                    className="px-3 py-1.5 bg-purple-700 hover:bg-purple-800 text-white rounded-lg text-xs font-bold shadow-xs transition flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Sliders className="w-3.5 h-3.5" />
-                    <span>Hızları Düzenle</span>
-                  </button>
-                </div>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="bg-purple-50/70 text-purple-950 font-semibold border-b border-purple-200 whitespace-nowrap">
-                      <th className="py-2 px-3">İstasyon</th>
-                      <th className="py-2 px-3 text-right">X_2005 (m)</th>
-                      <th className="py-2 px-3 text-right">Y_2005 (m)</th>
-                      <th className="py-2 px-3 text-right">Z_2005 (m)</th>
-                      <th className="py-2 px-3 text-center">Onaylı Hızlar (Vx, Vy, Vz)</th>
-                      <th className="py-2 px-3 text-right text-purple-800">Toplam Kayma (cm)</th>
-                      <th className="py-2 px-3 text-right font-bold text-slate-900 bg-emerald-50/60">X(t) Ölçü (m)</th>
-                      <th className="py-2 px-3 text-right font-bold text-slate-900 bg-emerald-50/60">Y(t) Ölçü (m)</th>
-                      <th className="py-2 px-3 text-right font-bold text-slate-900 bg-emerald-50/60">Z(t) Ölçü (m)</th>
-                      <th className="py-2 px-3 text-right text-sky-800">TM Sağa Y (m)</th>
-                      <th className="py-2 px-3 text-right text-sky-800">TM Yukarı X (m)</th>
-                      <th className="py-2 px-3 text-right text-emerald-800">Elip. Kot h (m)</th>
-                      <th className="py-2 px-3 text-center">İşlem</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-purple-100 font-mono">
-                    {corsStations.map((st) => {
-                      const dt = surveyEpoch - 2005.00;
-                      const rX = st.refX ?? st.x;
-                      const rY = st.refY ?? st.y;
-                      const rZ = st.refZ ?? st.z;
-                      const vx = st.velocities?.vx || 0;
-                      const vy = st.velocities?.vy || 0;
-                      const vz = st.velocities?.vz || 0;
-                      const shiftM = Math.sqrt(
-                        Math.pow(vx * dt, 2) + Math.pow(vy * dt, 2) + Math.pow(vz * dt, 2)
-                      );
-
-                      return (
-                        <tr key={st.id} className="hover:bg-purple-50/40 transition">
-                          <td className="py-2.5 px-3 font-sans font-bold text-slate-900 flex items-center gap-1.5 whitespace-nowrap">
-                            <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                            <span>{st.name}</span>
-                          </td>
-                          <td className="py-2.5 px-3 text-right text-slate-600">{rX.toFixed(4)}</td>
-                          <td className="py-2.5 px-3 text-right text-slate-600">{rY.toFixed(4)}</td>
-                          <td className="py-2.5 px-3 text-right text-slate-600">{rZ.toFixed(4)}</td>
-                          <td className="py-2.5 px-3 text-center text-purple-700 font-bold whitespace-nowrap">
-                            {(vx * 1000).toFixed(1)}, {(vy * 1000).toFixed(1)}, {(vz * 1000).toFixed(1)} mm/yıl
-                          </td>
-                          <td className="py-2.5 px-3 text-right font-bold text-purple-900">
-                            {(shiftM * 100).toFixed(1)} cm
-                          </td>
-                          <td className="py-2.5 px-3 text-right font-bold text-slate-900 bg-emerald-50/40">
-                            {st.x.toFixed(4)}
-                          </td>
-                          <td className="py-2.5 px-3 text-right font-bold text-slate-900 bg-emerald-50/40">
-                            {st.y.toFixed(4)}
-                          </td>
-                          <td className="py-2.5 px-3 text-right font-bold text-slate-900 bg-emerald-50/40">
-                            {st.z.toFixed(4)}
-                          </td>
-                          <td className="py-2.5 px-3 text-right font-bold text-sky-800">
-                            {st.projY.toFixed(4)}
-                          </td>
-                          <td className="py-2.5 px-3 text-right font-bold text-sky-800">
-                            {st.projX.toFixed(4)}
-                          </td>
-                          <td className="py-2.5 px-3 text-right font-bold text-emerald-800">
-                            {st.h.toFixed(4)}
-                          </td>
-                          <td className="py-2.5 px-3 text-center font-sans">
-                            <button
-                              onClick={() => handleOpenVelocityModal(st.id)}
-                              className="px-2 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded text-[10px] font-bold cursor-pointer"
-                            >
-                              Düzenle
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
           {/* Full Width Station Table */}
           <div className="w-full bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
@@ -1948,237 +1781,6 @@ export const StationsAntennaTab: React.FC<Props> = ({
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* 5. OFFICIAL VELOCITY CALCULATION & REPORT MODAL (HIZ.png standard)       */}
-      {/* ========================================================================= */}
-      {isVelocityReportModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 sm:p-5">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-7xl w-full max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in duration-150">
-            {/* Modal Header */}
-            <div className="p-4 sm:p-5 border-b border-slate-200 bg-slate-900 text-white flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-purple-600/30 border border-purple-500/40 flex items-center justify-center text-purple-300">
-                  <FileSpreadsheet className="w-5 h-5 text-emerald-400" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="font-bold text-sm sm:text-base text-white">
-                      Hız Hesabı ve Epok Öteleme Raporu (BÖHYY & HGM Standartları)
-                    </h3>
-                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                      Doğrulandı: %100 Geodetik Uyumlu
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    Referans Epok: <strong>2005.00</strong> (ITRF96 / TUREF) &bull; 
-                    Ölçü Epoğu: <strong>t = {surveyEpoch.toFixed(2)}</strong> (Δt = {(surveyEpoch - 2005.00).toFixed(2)} Yıl) &bull; 
-                    DOM: <strong>{dom}&deg;</strong> &bull; Elipsoit: <strong>GRS80</strong>
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleExportVelocityExcel}
-                  className="px-3.5 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg shadow-sm transition flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Excel (.xlsx) İndir</span>
-                </button>
-                <button
-                  onClick={() => setIsVelocityReportModalOpen(false)}
-                  className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 cursor-pointer"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
-
-            {/* Modal Body */}
-            <div className="p-4 sm:p-6 overflow-y-auto space-y-4 text-xs">
-              {/* Mathematical Verification Alert Box */}
-              <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl space-y-2 text-emerald-950">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 font-bold text-xs sm:text-sm text-emerald-900">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    <span>Hız Hesabı ve Matematiksel Doğrulama Raporu:</span>
-                  </div>
-                  <span className="text-[11px] font-mono text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded">
-                    BÖHYY 2018 Madde 20 & 21 Standartları
-                  </span>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-[11px] pt-1">
-                  <div className="bg-white/80 p-2.5 rounded-lg border border-emerald-200/80">
-                    <strong className="block text-emerald-900 mb-0.5">1. Hız Dönüşümü (R_enu)</strong>
-                    <span className="text-slate-600">
-                      Kartezyen hızlar $(V_x, V_y, V_z)$ ile toposentrik hızlar $(V_e, V_n, V_u)$ dönüşümü analitik olarak tam örtüşmektedir.
-                    </span>
-                  </div>
-                  <div className="bg-white/80 p-2.5 rounded-lg border border-emerald-200/80">
-                    <strong className="block text-emerald-900 mb-0.5">2. Epok Öteleme ($X_t$)</strong>
-                    <span className="text-slate-600">
-                      $X(t) = X_{'{2005}'} + V_x \cdot \Delta t$ denklemi ile $\Delta t = {(surveyEpoch - 2005.00).toFixed(2)}$ yıllık deformasyon hatasız uygulanmıştır.
-                    </span>
-                  </div>
-                  <div className="bg-white/80 p-2.5 rounded-lg border border-emerald-200/80">
-                    <strong className="block text-emerald-900 mb-0.5">3. TUTGA IDW Enterpolasyonu</strong>
-                    <span className="text-slate-600">
-                      Ölçülen yeni noktaların tektonik hızları, sabit CORS istasyonlarından $p_i = 1/d_i^2$ ağırlıklarıyla enterpole edilmiştir.
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Data Table matching HIZ.png */}
-              {(() => {
-                const reportItems = generateVelocityReportData(stations, surveyEpoch, 2005.00, dom);
-                return (
-                  <div className="space-y-4">
-                    <div className="border border-slate-200 rounded-xl overflow-hidden shadow-xs">
-                      <div className="bg-slate-50 px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
-                        <span className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
-                          <Table className="w-4 h-4 text-purple-600" />
-                          <span>Hız Hesabı Çıktı Tablosu ({reportItems.length} İstasyon)</span>
-                        </span>
-                        <span className="text-[11px] text-slate-500">
-                          BÖHYY ve TUSAGA-Aktif resmi hız hesabı formatı
-                        </span>
-                      </div>
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left text-xs border-collapse">
-                          <thead>
-                            <tr className="bg-slate-100/80 text-slate-700 font-semibold border-b border-slate-200 whitespace-nowrap text-[11px]">
-                              <th className="py-2 px-2.5">Nokta No</th>
-                              <th className="py-2 px-2.5">Durum</th>
-                              <th className="py-2 px-2.5 text-right">X_2005 (m)</th>
-                              <th className="py-2 px-2.5 text-right">Y_2005 (m)</th>
-                              <th className="py-2 px-2.5 text-right">Z_2005 (m)</th>
-                              <th className="py-2 px-2.5 text-right">Enlem B (&deg;)</th>
-                              <th className="py-2 px-2.5 text-right">Boylam L (&deg;)</th>
-                              <th className="py-2 px-2.5 text-right">H (m)</th>
-                              <th className="py-2 px-2.5 text-right font-bold text-purple-900 bg-purple-50/50">Vx (m/yıl)</th>
-                              <th className="py-2 px-2.5 text-right font-bold text-purple-900 bg-purple-50/50">Vy (m/yıl)</th>
-                              <th className="py-2 px-2.5 text-right font-bold text-purple-900 bg-purple-50/50">Vz (m/yıl)</th>
-                              <th className="py-2 px-2.5 text-right font-bold text-sky-900 bg-sky-50/50">Ve (mm/yıl)</th>
-                              <th className="py-2 px-2.5 text-right font-bold text-sky-900 bg-sky-50/50">Vn (mm/yıl)</th>
-                              <th className="py-2 px-2.5 text-right font-bold text-sky-900 bg-sky-50/50">Vu (mm/yıl)</th>
-                              <th className="py-2 px-2.5 text-right font-bold text-indigo-900 bg-indigo-50/50">V_yatay (mm/yıl)</th>
-                              <th className="py-2 px-2.5 text-right font-bold text-indigo-900 bg-indigo-50/50">Azimut (Grad)</th>
-                              <th className="py-2 px-2.5 text-right font-bold text-emerald-900 bg-emerald-50/50">X(t) (m)</th>
-                              <th className="py-2 px-2.5 text-right font-bold text-emerald-900 bg-emerald-50/50">Y(t) (m)</th>
-                              <th className="py-2 px-2.5 text-right font-bold text-emerald-900 bg-emerald-50/50">Z(t) (m)</th>
-                              <th className="py-2 px-2.5 text-right text-purple-900">3D Kayma (cm)</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100 font-mono text-[11px]">
-                            {reportItems.map((it) => (
-                              <tr key={it.id} className="hover:bg-slate-50 transition whitespace-nowrap">
-                                <td className="py-2 px-2.5 font-sans font-bold text-slate-900 flex items-center gap-1.5">
-                                  <span className={`w-2 h-2 rounded-full ${it.isFixed ? 'bg-purple-600' : 'bg-sky-500'}`} />
-                                  <span>{it.name}</span>
-                                </td>
-                                <td className="py-2 px-2.5 font-sans">
-                                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                                    it.isFixed ? 'bg-purple-100 text-purple-800' : 'bg-sky-100 text-sky-800'
-                                  }`}>
-                                    {it.status}
-                                  </span>
-                                </td>
-                                <td className="py-2 px-2.5 text-right text-slate-600">{it.refX.toFixed(4)}</td>
-                                <td className="py-2 px-2.5 text-right text-slate-600">{it.refY.toFixed(4)}</td>
-                                <td className="py-2 px-2.5 text-right text-slate-600">{it.refZ.toFixed(4)}</td>
-                                <td className="py-2 px-2.5 text-right text-slate-600">{it.refLat.toFixed(6)}</td>
-                                <td className="py-2 px-2.5 text-right text-slate-600">{it.refLon.toFixed(6)}</td>
-                                <td className="py-2 px-2.5 text-right text-slate-600">{it.refH.toFixed(3)}</td>
-                                <td className="py-2 px-2.5 text-right text-purple-900 font-bold bg-purple-50/20">{it.vx.toFixed(5)}</td>
-                                <td className="py-2 px-2.5 text-right text-purple-900 font-bold bg-purple-50/20">{it.vy.toFixed(5)}</td>
-                                <td className="py-2 px-2.5 text-right text-purple-900 font-bold bg-purple-50/20">{it.vz.toFixed(5)}</td>
-                                <td className="py-2 px-2.5 text-right text-sky-900 font-bold bg-sky-50/20">{it.ve.toFixed(2)}</td>
-                                <td className="py-2 px-2.5 text-right text-sky-900 font-bold bg-sky-50/20">{it.vn.toFixed(2)}</td>
-                                <td className="py-2 px-2.5 text-right text-sky-900 font-bold bg-sky-50/20">{it.vu.toFixed(2)}</td>
-                                <td className="py-2 px-2.5 text-right text-indigo-900 font-bold bg-indigo-50/20">{it.vHorizontal.toFixed(2)}</td>
-                                <td className="py-2 px-2.5 text-right text-indigo-900 font-bold bg-indigo-50/20">{it.vAzimuthGrad.toFixed(2)}</td>
-                                <td className="py-2 px-2.5 text-right text-emerald-950 font-bold bg-emerald-50/30">{it.surveyX.toFixed(4)}</td>
-                                <td className="py-2 px-2.5 text-right text-emerald-950 font-bold bg-emerald-50/30">{it.surveyY.toFixed(4)}</td>
-                                <td className="py-2 px-2.5 text-right text-emerald-950 font-bold bg-emerald-50/30">{it.surveyZ.toFixed(4)}</td>
-                                <td className="py-2 px-2.5 text-right text-purple-900 font-bold">{it.dSpatial_cm.toFixed(2)} cm</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-
-                    {/* IDW Breakdown for Interpolated Points */}
-                    {reportItems.some((it) => it.interpolationDetails && it.interpolationDetails.length > 0) && (
-                      <div className="border border-indigo-200 rounded-xl overflow-hidden bg-indigo-50/30 p-4 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <h4 className="font-bold text-indigo-950 flex items-center gap-1.5 text-xs">
-                            <TrendingUp className="w-4 h-4 text-indigo-600" />
-                            <span>TUTGA Ters Uzaklık Ağırlıklı (IDW) Enterpolasyon Hesap Dökümü:</span>
-                          </h4>
-                          <span className="text-[11px] text-indigo-700 font-mono">p_i = 1 / d_i&sup2;</span>
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                          {reportItems
-                            .filter((it) => it.interpolationDetails && it.interpolationDetails.length > 0)
-                            .map((it) => (
-                              <div key={it.id} className="bg-white p-3 rounded-lg border border-indigo-200 shadow-2xs space-y-2">
-                                <div className="flex items-center justify-between border-b border-indigo-100 pb-1.5">
-                                  <strong className="text-slate-900">{it.name} (Proje Noktası)</strong>
-                                  <span className="text-indigo-700 font-bold font-mono">
-                                    V_yatay = {it.vHorizontal} mm/yıl (Azimut: {it.vAzimuthGrad} G)
-                                  </span>
-                                </div>
-                                <div className="space-y-1">
-                                  {it.interpolationDetails?.map((d) => (
-                                    <div key={d.refId} className="flex items-center justify-between text-[11px] font-mono text-slate-600">
-                                      <span>
-                                        &bull; {d.refName}: <strong>{d.distKm} km</strong>
-                                      </span>
-                                      <span>
-                                        Katkı: <strong>{d.weightPercent}%</strong> | Ref: ({d.refVe.toFixed(1)}, {d.refVn.toFixed(1)} mm/yıl)
-                                      </span>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-            </div>
-
-            {/* Modal Footer */}
-            <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-xs">
-              <span className="text-slate-500">
-                Hesaplanan hız ve epok kaydırma sonuçları Excel dosyasında 4 ayrı sayfa olarak yapılandırılmıştır.
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsVelocityReportModalOpen(false)}
-                  className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 font-semibold cursor-pointer"
-                >
-                  Kapat
-                </button>
-                <button
-                  type="button"
-                  onClick={handleExportVelocityExcel}
-                  className="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-sm transition cursor-pointer flex items-center gap-1.5"
-                >
-                  <Download className="w-4 h-4" />
-                  <span>Excel (.xlsx) Olarak İndir</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

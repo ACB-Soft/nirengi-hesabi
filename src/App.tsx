@@ -654,6 +654,7 @@ export default function App() {
               if (stnId) setSelectedOccupationStationId(stnId);
               setActiveTab('qc');
             }}
+            onNavigateTab={(tab) => setActiveTab(tab as TabKey)}
           />
         )}
 
