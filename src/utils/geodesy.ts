@@ -101,29 +101,64 @@ export function getIgsProductDetails(dateStr?: string, epochDecimal?: number): I
   // Rapid (IGR): ~17-41 hours latency (< 2.5 cm orbit accuracy)
   // Ultra-Rapid (IGU): Real-time / hourly (< 3-5 cm orbit accuracy)
   let productType: 'FINAL' | 'RAPID' | 'ULTRA_RAPID' = 'FINAL';
-  let productName = `igs${week}${dayOfWeek}.sp3`;
-  let clkName = `igs${week}${dayOfWeek}.clk`;
   let accuracyEstimate = '< 2.0 cm (En Yüksek / AUSPOS & Bernese Standardı)';
   let recommendationText = 'IGS Final Yörünge ürünü mevcut. Bernese/AUSPOS düzeyinde en yüksek hassasiyet.';
 
+  let legacyPrefix = 'igs';
+  let modernPrefix = 'IGS0OPSFIN';
+  let clkPrefix = 'IGS0OPSFIN';
+  let durationStr = '01D';
+  let samplingStr = '15M';
+  let clkSamplingStr = '30S';
+
   if (diffDaysFromNow < 2) {
     productType = 'ULTRA_RAPID';
-    productName = `igu${week}${dayOfWeek}_18.sp3`;
-    clkName = `igu${week}${dayOfWeek}_18.clk`;
+    legacyPrefix = 'igu';
+    modernPrefix = 'IGS0OPSULT';
+    clkPrefix = 'IGS0OPSULT';
+    durationStr = '02D';
+    samplingStr = '15M';
+    clkSamplingStr = '15M';
     accuracyEstimate = '< 5.0 cm (Hızlı Ön Çözüm)';
     recommendationText = 'Gözlem çok yeni (< 2 gün). IGS Ultra-Rapid (IGU) ürünü kullanılabilir.';
   } else if (diffDaysFromNow < 13) {
     productType = 'RAPID';
-    productName = `igr${week}${dayOfWeek}.sp3`;
-    clkName = `igr${week}${dayOfWeek}.clk`;
+    legacyPrefix = 'igr';
+    modernPrefix = 'IGS0OPSRAP';
+    clkPrefix = 'IGS0OPSRAP';
+    durationStr = '01D';
+    samplingStr = '15M';
+    clkSamplingStr = '05M';
     accuracyEstimate = '< 2.5 cm (Yüksek Hassasiyet)';
     recommendationText = 'Gözlem 2-13 gün önce yapılmış. IGS Rapid (IGR) ürünü hazır ve kullanılabilir.';
   }
 
+  // IGS Long Product Filenames standard (adopted since GPS Week 2238 / Nov 27, 2022):
+  // Format: {AC}0{TYPE}{SOL}_{YYYY}{DDD}0000_{DUR}_{SMP}_{CONTENT}.{EXT}.gz
+  // e.g. for GPS Week 2416, 2026-04-30 (DOY 120):
+  // Final: IGS0OPSFIN_20261200000_01D_15M_ORB.SP3.gz
+  const isModernIgs = week >= 2238;
+  const modernName = `${modernPrefix}_${year}${doyStr}0000_${durationStr}_${samplingStr}_ORB.SP3.gz`;
+  const modernClkName = `${clkPrefix}_${year}${doyStr}0000_${durationStr}_${clkSamplingStr}_CLK.CLK.gz`;
+  const legacySp3Name = productType === 'ULTRA_RAPID' ? `igu${week}${dayOfWeek}_18.sp3.Z` : `${legacyPrefix}${week}${dayOfWeek}.sp3.Z`;
+  const legacyClkName = productType === 'ULTRA_RAPID' ? `igu${week}${dayOfWeek}_18.clk.Z` : `${legacyPrefix}${week}${dayOfWeek}.clk.Z`;
+
+  const productName = isModernIgs ? modernName : legacySp3Name;
+  const legacyName = legacySp3Name;
+  const clkName = isModernIgs ? modernClkName : legacyClkName;
+
   // CDDIS / IGN / BKG URL patterns
-  const cddisUrl = `https://cddis.nasa.gov/archive/gnss/products/${week}/${productName}.Z`;
-  const ignUrl = `https://igs.ign.fr/pub/igs/products/${week}/${productName}.Z`;
-  const bkgUrl = `https://igs.bkg.bund.de/root_ftp/IGS/products/${week}/${productName}.Z`;
+  // CDDIS direct download URL and folder archive URL
+  const cddisUrl = `https://cddis.nasa.gov/archive/gnss/products/${week}/${productName}`;
+  const cddisFolderUrl = `https://cddis.nasa.gov/archive/gnss/products/${week}/`;
+
+  // IGN (France) - Open public mirror, NO Earthdata login required
+  const ignUrl = `https://igs.ign.fr/pub/igs/products/${week}/${productName}`;
+  const ignFolderUrl = `https://igs.ign.fr/pub/igs/products/${week}/`;
+
+  // BKG (Germany) - Open public mirror, NO Earthdata login required
+  const bkgUrl = `https://igs.bkg.bund.de/root_ftp/IGS/products/${week}/${productName}`;
+  const bkgFolderUrl = `https://igs.bkg.bund.de/root_ftp/IGS/products/${week}/`;
 
   const dateFormatted = obsDate.toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
 
@@ -135,10 +170,14 @@ export function getIgsProductDetails(dateStr?: string, epochDecimal?: number): I
     doy,
     productType,
     productName,
+    legacyName,
     clkName,
     cddisUrl,
+    cddisFolderUrl,
     ignUrl,
+    ignFolderUrl,
     bkgUrl,
+    bkgFolderUrl,
     latencyDays: Math.floor(diffDaysFromNow),
     accuracyEstimate,
     recommendationText,
@@ -149,35 +188,72 @@ export function getIgsProductDetails(dateStr?: string, epochDecimal?: number): I
  * Basic parser for .SP3 precise orbit files
  */
 export function parseIgsSp3File(content: string, fileName: string): IgsSp3File | null {
-  if (!content || !content.startsWith('#')) return null;
+  if (!content || !content.trim().startsWith('#')) return null;
 
   const lines = content.split(/\r?\n/);
   const headerLine = lines[0] || '';
+  let gpsWeek = 0;
+  let dayOfWeek = 0;
 
-  // Extract GPS Week and Day of Week from standard SP3 header
-  // e.g. #cP2024  6 15  0  0  0.00000000     96 ORBIT IGS20 HGM ...
+  // SP3 Header Specification:
+  // Line 1: #cP2026  4 30  0  0  0.00000000     96 ORBIT IGS20 HGM ...
+  // Line 2: ## 2416 345600.00000000    900.00000000 61160 0.0000000000000
+  if (lines.length > 1 && lines[1].startsWith('##')) {
+    const matchWeek = lines[1].match(/^##\s+(\d+)\s+([\d.]+)/);
+    if (matchWeek) {
+      gpsWeek = parseInt(matchWeek[1], 10);
+      const sow = parseFloat(matchWeek[2]);
+      dayOfWeek = Math.min(6, Math.max(0, Math.floor(sow / 86400)));
+    }
+  }
+
+  // Fallback: extract date from Line 1 (#cP2026  4 30)
+  if (gpsWeek === 0) {
+    const matchDate = headerLine.match(/^#[a-zA-Z0-9]{1,2}\s*(\d{4})\s+(\d{1,2})\s+(\d{1,2})/);
+    if (matchDate) {
+      const y = parseInt(matchDate[1], 10);
+      const m = parseInt(matchDate[2], 10) - 1;
+      const d = parseInt(matchDate[3], 10);
+      const tMs = Date.UTC(y, m, d);
+      const gpsEpochMs = Date.UTC(1980, 0, 6);
+      const diffDays = Math.floor((tMs - gpsEpochMs) / (86400 * 1000));
+      if (diffDays >= 0) {
+        gpsWeek = Math.floor(diffDays / 7);
+        dayOfWeek = diffDays % 7;
+      }
+    }
+  }
+
   let epochCount = 0;
   const satellites = new Set<string>();
 
   for (const line of lines) {
     if (line.startsWith('*')) {
       epochCount++;
-    } else if (line.startsWith('P') || line.startsWith('PG') || line.startsWith('PR') || line.startsWith('PE')) {
+    } else if (line.startsWith('P') || line.startsWith('PG') || line.startsWith('PR') || line.startsWith('PE') || line.startsWith('PC')) {
       const satId = line.substring(1, 4).trim();
-      if (satId) satellites.add(satId);
+      if (satId && (satId.startsWith('G') || satId.startsWith('R') || satId.startsWith('E') || satId.startsWith('C') || /^\d+$/.test(satId))) {
+        satellites.add(satId);
+      }
     }
   }
 
   const satList = Array.from(satellites).sort();
+  const lowerName = fileName.toLowerCase();
+  const productType = lowerName.includes('ult') || lowerName.startsWith('igu')
+    ? 'ULTRA_RAPID'
+    : lowerName.includes('rap') || lowerName.startsWith('igr')
+    ? 'RAPID'
+    : 'FINAL';
 
   return {
     fileName,
-    gpsWeek: 2318,
-    dayOfWeek: 6,
+    gpsWeek: gpsWeek || 2416,
+    dayOfWeek,
     epochCount: Math.max(epochCount, 96),
     satelliteCount: satList.length,
     satellites: satList,
-    productType: fileName.toLowerCase().startsWith('igu') ? 'ULTRA_RAPID' : fileName.toLowerCase().startsWith('igr') ? 'RAPID' : 'FINAL',
+    productType,
   };
 }
 

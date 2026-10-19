@@ -377,28 +377,40 @@ export const StationsAntennaTab: React.FC<Props> = ({
   };
 
   /**
-   * Handle SP3 Precise Orbit File Upload
+   * Handle SP3 Precise Orbit File Upload (supports .sp3, .eph, and .gz / .SP3.gz)
    */
-  const handleSp3Upload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSp3Upload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const text = event.target?.result as string;
-      if (!text) return;
+    try {
+      let text = '';
+      if (file.name.toLowerCase().endsWith('.gz') || file.type.includes('gzip')) {
+        // Native browser decompression of .gz / .SP3.gz files
+        const ds = new DecompressionStream('gzip');
+        const stream = file.stream().pipeThrough(ds);
+        text = await new Response(stream).text();
+      } else {
+        text = await file.text();
+      }
+
+      if (!text) {
+        setUploadFeedback('Dosya içeriği boş veya okunamadı.');
+        return;
+      }
 
       const parsed = parseIgsSp3File(text, file.name);
       if (parsed) {
         setLoadedSp3File(parsed);
         setUploadFeedback(
-          `IGS Hassas Yörünge Dosyası (.SP3) yüklendi: ${file.name} (${parsed.satelliteCount} Uydu, ${parsed.epochCount} Epok). AUSPOS / Bernese düzeyinde hassasiyet aktif.`
+          `IGS Hassas Yörünge Dosyası (.SP3) yüklendi: ${file.name} (Hafta: ${parsed.gpsWeek}-${parsed.dayOfWeek}, ${parsed.satelliteCount} Uydu, ${parsed.epochCount} Epok). AUSPOS / Bernese düzeyinde hassasiyet aktif.`
         );
       } else {
-        setUploadFeedback(`Geçerli bir IGS .SP3 hassas yörünge dosyası formatı tespit edilemedi.`);
+        setUploadFeedback('Geçerli bir IGS .SP3 hassas yörünge dosyası formatı tespit edilemedi.');
       }
-    };
-    reader.readAsText(file);
+    } catch (err: any) {
+      setUploadFeedback(`SP3 dosyası okunurken hata oluştu: ${err?.message || err}`);
+    }
     e.target.value = '';
   };
 
@@ -847,24 +859,24 @@ export const StationsAntennaTab: React.FC<Props> = ({
           <div className="pt-3 mt-3 border-t border-slate-100 flex items-center gap-1.5">
             <label className="flex-1 py-2 px-2 text-[11px] font-bold bg-slate-900 hover:bg-slate-800 text-white rounded-lg shadow-xs transition cursor-pointer flex items-center justify-center gap-1.5 text-center">
               <Satellite className="w-3 h-3 text-amber-400" />
-              <span>{loadedSp3File ? '.SP3 Değiştir' : '.SP3 Yükle'}</span>
+              <span>{loadedSp3File ? '.SP3 Değiştir' : '.SP3 / .gz Yükle'}</span>
               <input
                 type="file"
-                accept=".sp3,.eph,.clk,.SP3"
+                accept=".sp3,.eph,.clk,.SP3,.gz,.Z"
                 onChange={handleSp3Upload}
                 className="hidden"
               />
             </label>
             {igsOrbitInfo && (
               <a
-                href={igsOrbitInfo.cddisUrl}
+                href={igsOrbitInfo.ignUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="py-2 px-2.5 text-[11px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg transition inline-flex items-center gap-1"
-                title={`CDDIS IGS ${igsOrbitInfo.productName} indir`}
+                className="py-2 px-2.5 text-[11px] font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 rounded-lg transition inline-flex items-center gap-1"
+                title={`IGN (Açık Erişim) IGS ${igsOrbitInfo.productName} indir`}
               >
-                <Download className="w-3 h-3 text-amber-700" />
-                <span>İndir</span>
+                <Download className="w-3 h-3 text-emerald-700" />
+                <span>İndir (IGN)</span>
               </a>
             )}
           </div>
@@ -873,50 +885,84 @@ export const StationsAntennaTab: React.FC<Props> = ({
 
       {/* IGS Orbit Info Detail Box (if detected) */}
       {igsOrbitInfo && (
-        <div className="bg-linear-to-r from-slate-900 to-slate-800 text-white rounded-xl p-4 shadow-sm border border-slate-700 flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <Satellite className="w-4 h-4 text-sky-400" />
-              <span className="font-bold text-white text-sm">
-                Tespit Edilen IGS Hassas Yörünge: {igsOrbitInfo.productName}
-              </span>
-              <span className="px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 text-[10px] font-mono border border-sky-400/30">
-                GPS Hafta: {igsOrbitInfo.gpsWeek}-{igsOrbitInfo.dayOfWeek}
-              </span>
+        <div className="bg-linear-to-r from-slate-900 to-slate-800 text-white rounded-xl p-4 shadow-sm border border-slate-700 space-y-3 text-xs">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Satellite className="w-4 h-4 text-sky-400 shrink-0" />
+                <span className="font-bold text-white text-sm font-mono break-all">
+                  {igsOrbitInfo.productName}
+                </span>
+                <span className="px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 text-[10px] font-mono border border-sky-400/30">
+                  GPS Hafta: {igsOrbitInfo.gpsWeek}-{igsOrbitInfo.dayOfWeek} (DOY: {igsOrbitInfo.doy})
+                </span>
+                <span className="px-2 py-0.5 rounded bg-slate-700 text-slate-300 text-[10px] font-mono border border-slate-600">
+                  Eski 8.3 Kodu: {igsOrbitInfo.legacyName}
+                </span>
+              </div>
+              <p className="text-slate-300 text-[11px]">
+                {igsOrbitInfo.recommendationText} &bull; Hassasiyet: <strong className="text-emerald-400">{igsOrbitInfo.accuracyEstimate}</strong>
+              </p>
             </div>
-            <p className="text-slate-300 text-[11px]">
-              {igsOrbitInfo.recommendationText} &bull; Hassasiyet: <strong className="text-emerald-400">{igsOrbitInfo.accuracyEstimate}</strong>
-            </p>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* IGN France: Open Public Mirror - No Earthdata login required */}
+              <a
+                href={igsOrbitInfo.ignUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 shadow-xs transition"
+                title="IGN Fransa Açık Sunucusu: Üyelik veya giriş gerektirmeden tek tıkla doğrudan indirir"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>IGN (Doğrudan İndir)</span>
+              </a>
+
+              {/* BKG Germany: Open Public Mirror - No login required */}
+              <a
+                href={igsOrbitInfo.bkgUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 rounded-lg text-[11px] font-semibold flex items-center gap-1 transition"
+                title="BKG Almanya Açık Sunucusu"
+              >
+                <span>BKG (Almanya)</span>
+                <ExternalLink className="w-3 h-3 text-slate-400" />
+              </a>
+
+              {/* CDDIS NASA: Requires Earthdata Login */}
+              <a
+                href={igsOrbitInfo.cddisUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 rounded-lg text-[11px] font-semibold flex items-center gap-1 transition"
+                title="NASA CDDIS: Earthdata üyeliği ile giriş yapılarak indirilir"
+              >
+                <span>CDDIS (NASA Earthdata)</span>
+                <ExternalLink className="w-3 h-3 text-slate-400" />
+              </a>
+
+              {/* CDDIS Week Folder */}
+              <a
+                href={igsOrbitInfo.cddisFolderUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="px-2.5 py-1.5 bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg text-[10px] flex items-center gap-1 transition"
+                title={`Hafta ${igsOrbitInfo.gpsWeek} dizinini görüntüle`}
+              >
+                <span>Hafta {igsOrbitInfo.gpsWeek} Dizini</span>
+                <ExternalLink className="w-2.5 h-2.5 text-slate-400" />
+              </a>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2 flex-wrap">
-            <a
-              href={igsOrbitInfo.cddisUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 rounded-lg text-[11px] font-semibold flex items-center gap-1"
-            >
-              <span>CDDIS (NASA)</span>
-              <ExternalLink className="w-3 h-3 text-slate-400" />
-            </a>
-            <a
-              href={igsOrbitInfo.ignUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 rounded-lg text-[11px] font-semibold flex items-center gap-1"
-            >
-              <span>IGN (Fransa)</span>
-              <ExternalLink className="w-3 h-3 text-slate-400" />
-            </a>
-            <a
-              href={igsOrbitInfo.bkgUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 rounded-lg text-[11px] font-semibold flex items-center gap-1"
-            >
-              <span>BKG (Almanya)</span>
-              <ExternalLink className="w-3 h-3 text-slate-400" />
-            </a>
+          <div className="pt-2 border-t border-slate-700/60 text-[11px] text-slate-300 flex items-start gap-1.5">
+            <span className="font-bold text-amber-400 shrink-0">Bilgi:</span>
+            <span>
+              IGS, GPS 2238. haftasından (Kasım 2022) sonra eski <code>igs{igsOrbitInfo.gpsWeek}{igsOrbitInfo.dayOfWeek}.sp3.Z</code> adlandırmasını sonlandırarak 
+              modern RINEX 3 uzun adlandırma formatına (<code>{igsOrbitInfo.productName}</code>) geçmiştir. 
+              İndirdiğiniz <strong>.gz</strong> dosyasını arşivden çıkarmadan doğrudan <strong>.SP3 / .gz Yükle</strong> butonuyla sisteme aktarabilirsiniz (tarayıcı içinde otomatik açılır).
+            </span>
           </div>
         </div>
       )}
