@@ -176,17 +176,11 @@ export const BaselinesTab: React.FC<Props> = ({
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2">
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-700 border border-emerald-400/20 uppercase">
-                3. Faz: Baz Çözümü
-              </span>
-              <h2 className="text-lg font-extrabold text-slate-900">
-                3. Faz: Baz Vektörü Çözümü &amp; RTKLIB Motoru
-              </h2>
-            </div>
-            <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-              Statik Çift Fark (DD) taşıyıcı faz çözümü: ΔX, ΔY, ΔZ bağıl kartezyen bileşenler, 
-              LAMBDA tamsayı faz belirsizliği (Ratio &gt; 3.0), ve 3x3 tam varyans-kovaryans matrisleri.
+            <h2 className="text-lg font-extrabold text-slate-900">
+              Baz Vektörü Çözümleri
+            </h2>
+            <p className="text-xs text-slate-500 mt-1">
+              Statik çift fark bağıl koordinat farkları (ΔX, ΔY, ΔZ) ve 3x3 varyans-kovaryans matrisleri.
             </p>
           </div>
 

@@ -48,17 +48,11 @@ export const LoopClosureTab: React.FC<Props> = ({
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2">
-              <span className="bg-amber-100 text-amber-800 text-[10px] font-extrabold px-2 py-0.5 rounded border border-amber-300 uppercase">
-                4. Faz: Döngü Kapanmaları
-              </span>
-              <h2 className="text-base font-bold text-slate-900">
-                4. Faz: Topoloji ve Döngü Kapanış Analizörü (Loop Closure)
-              </h2>
-            </div>
+            <h2 className="text-base font-bold text-slate-900">
+              Döngü Kapanış Analizi (Loop Closure)
+            </h2>
             <p className="text-xs text-slate-500 mt-1">
-              Kapalı 3D bağımsız üçgen döngüleri.
-              Vektörel kapanış hatası w = sqrt(wX² + wY² + wZ²) ve 10 mm + 1.0 ppm × S tolerans denetimi.
+              Bağımsız 3D üçgen kapanışları ve BÖHYY bağıl tolerans denetimi.
             </p>
           </div>
 

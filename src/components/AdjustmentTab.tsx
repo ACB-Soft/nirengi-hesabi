@@ -47,24 +47,13 @@ export const AdjustmentTab: React.FC<Props> = ({
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2">
-              <span
-                className={`text-[10px] font-extrabold px-2 py-0.5 rounded border uppercase ${
-                  isFree
-                    ? 'bg-purple-100 text-purple-800 border-purple-300'
-                    : 'bg-sky-100 text-sky-800 border-sky-300'
-                }`}
-              >
-                {isFree ? '4. Faz: Serbest Dengeleme' : '4. Faz: Dayalı Dengeleme'}
-              </span>
-              <h2 className="text-base font-bold text-slate-900">
-                {isFree ? '4. Faz: Serbest (İç Tutarlılık) Ağ Dengelemesi' : '4. Faz: Dayalı (Tam Kısıtlı) Ağ Dengelemesi'}
-              </h2>
-            </div>
+            <h2 className="text-base font-bold text-slate-900">
+              {isFree ? 'Serbest Ağ Dengelemesi (İç Tutarlılık)' : 'Dayalı Ağ Dengelemesi'}
+            </h2>
             <p className="text-xs text-slate-500 mt-1">
               {isFree
-                ? 'Ağdaki ölçü kaba hatalarını (outliers) ve iç tutarlılığı test etmek için 1 referans noktası sabit kabul edilerek yapılan 3D Gauss-Markov dengelemesi.'
-                : 'Tüm TUSAGA-Aktif / CORS sabit noktaları dayanak alınarak yapılan nihai 3D Gauss-Markov dengelemesi.'}
+                ? 'Minimal kısıtla iç tutarlılık analizi ve Baarda w-testi ile kaba hata denetimi.'
+                : 'CORS sabitleri dayanak alınarak yapılan nihai 3D dengeleme.'}
             </p>
           </div>
 

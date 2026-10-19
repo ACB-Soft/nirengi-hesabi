@@ -79,14 +79,14 @@ type TabKey =
   | 'report';
 
 const WORKFLOW_STEPS: { id: TabKey; title: string; subtitle: string }[] = [
-  { id: 'home', title: 'Anasayfa', subtitle: 'Proje yönetimi, yeni proje başlatma ve kayıtlı projeler' },
-  { id: 'stations', title: '1. Faz: Veri Okuma ve Ayrıştırma', subtitle: '24 saatlik RINEX .obs/.nav yükleme, koordinat ve anten yönetimi' },
-  { id: 'qc', title: '2. Faz: Görselleştirme ve Kalite Kontrol (QC)', subtitle: 'Kutupsal uydu haritası (Skyplot), maske açısı ve SNR kalite denetimi' },
-  { id: 'baselines', title: '3. Faz: Baz Vektörü Çözümü', subtitle: 'Çift fark (Double Difference) faz çözümü ve varyans-kovaryans matrisleri' },
-  { id: 'loops', title: '4. Faz: Döngü Kapanmaları', subtitle: '3D kapalı üçgen döngüleri (Loop Closure) ve BÖHYY tolerans analizi' },
-  { id: 'free_adjustment', title: '4. Faz: Serbest Dengeleme', subtitle: 'Minimal kısıtlı iç tutarlılık ve Baarda w-testi kaba hata dengelemesi' },
-  { id: 'constrained_adjustment', title: '4. Faz: Dayalı Dengeleme', subtitle: 'CORS sabit koordinat yönetimi ve nihai 3D Gauss-Markov dengelemesi' },
-  { id: 'report', title: '5. Faz: Raporlama & CAD/CBS', subtitle: 'Resmi BÖHYY dengeleme karnesi, 3D hata elipsleri, DXF, KML, GeoJSON ve Excel' },
+  { id: 'home', title: 'Anasayfa', subtitle: 'Proje oluşturma, açma ve genel durum' },
+  { id: 'stations', title: 'İstasyonlar & RINEX', subtitle: 'GNSS istasyonları, RINEX gözlemleri ve anten parametreleri' },
+  { id: 'qc', title: 'Kalite Kontrol (QC)', subtitle: 'Uydu görünürlüğü, maske açısı ve sinyal kalitesi (Skyplot)' },
+  { id: 'baselines', title: 'Baz Çözümleri', subtitle: 'Statik çift fark bağıl baz çözümleri ve kovaryanslar' },
+  { id: 'loops', title: 'Döngü Kapanmaları', subtitle: 'Bağımsız üçgen kapanışları ve BÖHYY tolerans kontrolü' },
+  { id: 'free_adjustment', title: 'Serbest Dengeleme', subtitle: 'İç tutarlılık analizi ve Baarda kaba hata denetimi' },
+  { id: 'constrained_adjustment', title: 'Dayalı Dengeleme', subtitle: 'CORS dayanaklı nihai 3D ağ dengelemesi' },
+  { id: 'report', title: 'Raporlama & Dışa Aktar', subtitle: 'Resmi BÖHYY karnesi, DXF, KML, GeoJSON ve Excel' },
 ];
 
 export default function App() {
@@ -524,7 +524,7 @@ export default function App() {
             }`}
           >
             <Radio className="w-4 h-4 text-sky-600" />
-            <span>1. Faz: Veri Okuma &amp; Ayrıştırma</span>
+            <span>İstasyonlar &amp; RINEX</span>
             <span className="bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full text-[10px] font-bold">
               {stationCount}
             </span>
@@ -539,7 +539,7 @@ export default function App() {
             }`}
           >
             <Compass className="w-4 h-4 text-indigo-600" />
-            <span>2. Faz: Görselleştirme &amp; QC</span>
+            <span>Kalite Kontrol (QC)</span>
           </button>
 
           <button
@@ -551,7 +551,7 @@ export default function App() {
             }`}
           >
             <Share2 className="w-4 h-4 text-emerald-600" />
-            <span>3. Faz: Baz Vektörü Çözümü</span>
+            <span>Baz Çözümleri</span>
             <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full text-[10px] font-bold">
               {activeBaselineCount}
             </span>
@@ -566,7 +566,7 @@ export default function App() {
             }`}
           >
             <RotateCcw className="w-4 h-4 text-amber-600" />
-            <span>4. Faz: Döngü Kapanmaları</span>
+            <span>Döngü Kapanmaları</span>
             <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full text-[10px] font-bold">
               {loopClosures.length}
             </span>
@@ -581,7 +581,7 @@ export default function App() {
             }`}
           >
             <Sliders className="w-4 h-4 text-purple-600" />
-            <span>4. Faz: Serbest Dengeleme</span>
+            <span>Serbest Dengeleme</span>
             {unconstrainedResult && (
               <span
                 className={`w-2 h-2 rounded-full ${
@@ -600,7 +600,7 @@ export default function App() {
             }`}
           >
             <ShieldCheck className="w-4 h-4 text-indigo-600" />
-            <span>4. Faz: Dayalı Dengeleme</span>
+            <span>Dayalı Dengeleme</span>
             {constrainedResult && (
               <span
                 className={`w-2 h-2 rounded-full ${
@@ -619,7 +619,7 @@ export default function App() {
             }`}
           >
             <FileText className="w-4 h-4 text-rose-600" />
-            <span>5. Faz: Raporlama &amp; CAD/CBS</span>
+            <span>Rapor &amp; CAD/CBS</span>
           </button>
         </div>
 
@@ -632,6 +632,7 @@ export default function App() {
             savedProjects={savedProjects}
             onDeleteProject={handleDeleteProject}
             onRenameProject={handleRenameProject}
+            onNavigateTab={(tab) => setActiveTab(tab as TabKey)}
           />
         )}
 

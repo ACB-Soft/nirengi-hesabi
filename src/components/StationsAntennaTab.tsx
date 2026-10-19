@@ -646,17 +646,11 @@ export const StationsAntennaTab: React.FC<Props> = ({
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2">
-              <span className="bg-sky-100 text-sky-800 text-[10px] font-extrabold px-2 py-0.5 rounded border border-sky-300 uppercase">
-                1. Faz: Ingestion
-              </span>
-              <h2 className="text-base sm:text-lg font-bold text-slate-900">
-                1. Faz: Veri Okuma, Ayrıştırma ve Gözlem Yönetimi
-              </h2>
-            </div>
-            <p className="text-xs text-slate-500 mt-1 max-w-3xl">
-              Dengelenecek noktaların (Rover) ve TUSAGA-Aktif sabit bazlarının (Base) RINEX gözlem verileri, 
-              2005 epok hızları ($V_x, V_y, V_z$), IGS hassas yörünge (.SP3) ve NOAA mutlak anten kalibrasyonları (.ATX).
+            <h2 className="text-base sm:text-lg font-bold text-slate-900">
+              İstasyonlar, RINEX ve Gözlem Verileri
+            </h2>
+            <p className="text-xs text-slate-500 mt-1">
+              Rover ve TUSAGA sabit istasyonlarının RINEX gözlemleri, anten yükseklikleri, epok hızları ve IGS hassas yörünge verileri.
             </p>
           </div>
 
@@ -664,10 +658,10 @@ export const StationsAntennaTab: React.FC<Props> = ({
             <button
               onClick={() => setIsRinexModalOpen(true)}
               className="px-3.5 py-2 text-xs font-bold bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-700 hover:to-indigo-700 text-white rounded-lg shadow-xs transition cursor-pointer flex items-center gap-1.5"
-              title="Çevrimdışı RINEX Veri İçe Aktarma & OPFS Depo Yöneticisi (Faz 1)"
+              title="Çevrimdışı RINEX Veri İçe Aktarma & OPFS Depo Yöneticisi"
             >
               <Radio className="w-3.5 h-3.5 text-sky-200 animate-pulse" />
-              <span>Çevrimdışı RINEX İçe Aktar (Faz 1)</span>
+              <span>Çevrimdışı RINEX İçe Aktar</span>
             </button>
 
             {sortedStations.length > 0 && (
@@ -983,13 +977,11 @@ export const StationsAntennaTab: React.FC<Props> = ({
                   <div className="flex items-center gap-2">
                     <ShieldCheck className="w-5 h-5 text-purple-600" />
                     <h3 className="text-sm font-bold text-slate-900">
-                      TUSAGA Sabit Noktaları — 2005.00 Referans Epoğundan Ölçü/Dengeleme Epoğuna (t = {surveyEpoch.toFixed(2)}) Dönüşüm Tablosu
+                      TUSAGA Sabit Noktaları — Epok Koordinat Tablosu (t = {surveyEpoch.toFixed(2)})
                     </h3>
                   </div>
                   <p className="text-xs text-slate-500 mt-1">
-                    Resmi TUSAGA-Aktif portalından alınan 2005.00 koordinatları ve onaylı tektonik plaka hızları kullanılarak 
-                    ölçü/dengeleme epoğundaki (t = {surveyEpoch.toFixed(2)}, Δt = {(surveyEpoch - 2005.00).toFixed(2)} yıl) 
-                    Kartezyen (X, Y, Z), Geodezik (φ, λ, h) ve TM Projeksiyon koordinatları hesaplanmaktadır.
+                    2005.00 referans epoğundan ölçü epoğuna (t = {surveyEpoch.toFixed(2)}) ötelenmiş ECEF, Coğrafi ve TM koordinatları.
                   </p>
                 </div>
 

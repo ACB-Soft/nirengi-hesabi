@@ -469,29 +469,7 @@ export const NetworkAdjustmentResultsView: React.FC<Props> = ({
             </div>
           </div>
 
-          {/* Mathematical Model Explanatory Banner */}
-          <div className="p-4 bg-indigo-50/70 border border-indigo-200 rounded-xl text-xs space-y-2 text-indigo-950">
-            <div className="flex items-center gap-2 font-bold text-indigo-900">
-              <Cpu className="w-4 h-4 text-indigo-700" />
-              <span>DynAdjust 3D Gauss-Markov Matematiksel Model Çözümü</span>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 font-mono text-[11px] bg-white/80 p-3 rounded-lg border border-indigo-100">
-              <div className="space-y-1">
-                <p><strong>Gözlem Denklemi:</strong> V = A&middot;X̂ - W</p>
-                <p><strong>Normal Denklemler:</strong> N = Aᵀ&middot;P&middot;A, &nbsp; U = Aᵀ&middot;P&middot;W</p>
-                <p><strong>Bilinmeyenler:</strong> X̂ = N⁻¹&middot;U</p>
-              </div>
-              <div className="space-y-1">
-                <p><strong>Aposteriori Varyans:</strong> σ̂₀ = &radic;(Vᵀ&middot;P&middot;V / r)</p>
-                <p><strong>Kovaryans Matrisi:</strong> &Sigma;_X̂X̂ = σ̂₀² &middot; N⁻¹</p>
-                <p><strong>Kalıntı Kovaryansı:</strong> Q_vv = Q_ll - A&middot;N⁻¹&middot;Aᵀ</p>
-              </div>
-            </div>
-            <p className="text-[11px] text-indigo-800 leading-relaxed">
-              Bu algoritma; Geoscience Australia <strong>DynAdjust</strong> motorunun kullandığı simetrik pozitif-tanımlı blok Cholesky ve 
-              çift fark baz varyans-kovaryans matrislerini doğrudan işleyerek her bir baz için analitik olarak <em>Q_vv</em> matrisini ve Baarda <em>w-testi</em> istatistiğini türetir.
-            </p>
-          </div>
+
         </div>
       )}
     </div>

@@ -287,16 +287,11 @@ export const ConstrainedAdjustmentTab: React.FC<Props> = ({
       <div className="bg-white rounded-xl shadow-xs border border-slate-200 p-5">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2">
-              <span className="bg-indigo-100 text-indigo-800 text-[10px] font-extrabold px-2.5 py-0.5 rounded border border-indigo-300 uppercase">
-                4. Faz: Dayalı Dengeleme
-              </span>
-              <h2 className="text-base sm:text-lg font-bold text-slate-900">
-                4. Faz: CORS Sabitli Dayalı 3D Ağ Dengelemesi
-              </h2>
-            </div>
-            <p className="text-xs text-slate-500 mt-1 max-w-3xl">
-              TUSAGA-Aktif resmi bilinen koordinatlarını inceleyin, düzenleyin veya toplu yapıştırın; CORS sabitli nihai 3D Gauss-Markov dengelemesini ve BÖHYY tolerans testlerini tek ekranda çalıştırın.
+            <h2 className="text-base sm:text-lg font-bold text-slate-900">
+              Dayalı Ağ Dengelemesi (CORS Sabitli)
+            </h2>
+            <p className="text-xs text-slate-500 mt-1">
+              TUSAGA sabit koordinatlarını tanımlayın ve 3D Gauss-Markov modeli ile nihai dengelemeyi gerçekleştirin.
             </p>
           </div>
 
@@ -315,10 +310,10 @@ export const ConstrainedAdjustmentTab: React.FC<Props> = ({
               <button
                 onClick={onNavigateToReport}
                 className="px-4 py-2.5 text-xs sm:text-sm font-bold bg-rose-600 hover:bg-rose-700 text-white rounded-lg shadow-sm transition cursor-pointer flex items-center gap-2 active:scale-95 animate-fade-in"
-                title="5. Faz: Resmi BÖHYY Dengeleme Karnesi ve CAD/CBS Dışa Aktarıma Git"
+                title="Resmi BÖHYY Dengeleme Karnesi ve CAD/CBS Dışa Aktarıma Git"
               >
                 <Award className="w-4 h-4 text-amber-300" />
-                <span>5. Faz: Resmi Karne &amp; CAD/CBS &rarr;</span>
+                <span>Rapor &amp; CAD/CBS &rarr;</span>
               </button>
             )}
           </div>
@@ -412,7 +407,7 @@ export const ConstrainedAdjustmentTab: React.FC<Props> = ({
             <ShieldCheck className="w-5 h-5 text-indigo-600" />
             <div>
               <h3 className="text-sm font-bold text-slate-900">
-                1. Sabit Noktalar ve TUSAGA Resmi Koordinatları
+                Sabit Noktalar ve Dayanak Koordinatları
               </h3>
               <p className="text-[11px] text-slate-500">
                 Ağda dayanak alınan CORS istasyonları ({fixedStations.length} Sabit, {roverStations.length} Serbest Rover)

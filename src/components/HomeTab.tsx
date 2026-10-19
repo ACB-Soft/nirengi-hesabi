@@ -31,6 +31,7 @@ interface HomeTabProps {
   savedProjects: SavedProject[];
   onDeleteProject: (id: string) => void;
   onRenameProject: (id: string, newName: string) => void;
+  onNavigateTab?: (tab: string) => void;
 }
 
 export const HomeTab: React.FC<HomeTabProps> = ({
@@ -40,6 +41,7 @@ export const HomeTab: React.FC<HomeTabProps> = ({
   savedProjects,
   onDeleteProject,
   onRenameProject,
+  onNavigateTab,
 }) => {
   const [isLoadModalOpen, setIsLoadModalOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -157,14 +159,14 @@ export const HomeTab: React.FC<HomeTabProps> = ({
       />
 
       {/* Hero Welcome Banner */}
-      <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-sky-950 text-white rounded-3xl p-6 sm:p-10 shadow-xl border border-slate-700/60 relative overflow-hidden">
-        <div className="relative z-10 max-w-2xl space-y-4">
-          
-          <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
-            Nirengi Hesabı ve GNSS Ağ Dengeleme Uygulamasına Hoş Geldiniz
+      {/* Hero Banner */}
+      <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-sky-950 text-white rounded-3xl p-6 sm:p-8 shadow-xl border border-slate-700/60 relative overflow-hidden">
+        <div className="relative z-10 max-w-2xl space-y-3">
+          <h2 className="text-xl sm:text-2xl font-extrabold tracking-tight text-white">
+            GNSS Nirengi Ağı Dengeleme ve Raporlama
           </h2>
-          <p className="text-sm text-slate-300 leading-relaxed">
-            TUSAGA-Aktif CORS istasyonları ve Rover GNSS ölçülerini entegre edin, TUSAGA 2005.00 epok hızlarını enterpole edin, kapalı üçgen döngülerini (Loop Closure) denetleyin ve 3D Gauss-Markov modeli ile dayalı ağ dengelemesini gerçekleştirin.
+          <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+            TUSAGA-Aktif ve Rover ölçüleriyle 3D Gauss-Markov ağ dengelemesi, kalite kontrolü ve BÖHYY standartlarında onaylanabilir hesap karnesi.
           </p>
         </div>
 
@@ -182,27 +184,27 @@ export const HomeTab: React.FC<HomeTabProps> = ({
       </div>
 
       {/* Main Action Cards (Yeni Proje Başlat & Proje Yükle) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Card 1: Yeni Proje Başlat */}
         <div
           onClick={onNewProject}
-          className="group bg-white hover:bg-sky-50/40 p-6 sm:p-8 rounded-2xl border-2 border-slate-200 hover:border-sky-500 shadow-xs hover:shadow-md transition-all cursor-pointer flex flex-col justify-between"
+          className="group bg-white hover:bg-sky-50/40 p-5 sm:p-6 rounded-2xl border-2 border-slate-200 hover:border-sky-500 shadow-xs hover:shadow-md transition-all cursor-pointer flex flex-col justify-between"
         >
-          <div className="space-y-4">
-            <div className="w-14 h-14 rounded-2xl bg-sky-100 text-sky-700 flex items-center justify-center group-hover:scale-105 transition-transform">
-              <FilePlus2 className="w-7 h-7" />
+          <div className="space-y-3">
+            <div className="w-12 h-12 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center group-hover:scale-105 transition-transform">
+              <FilePlus2 className="w-6 h-6" />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-slate-900 group-hover:text-sky-700 transition-colors">
+              <h3 className="text-base font-bold text-slate-900 group-hover:text-sky-700 transition-colors">
                 Yeni Proje Başlat
               </h3>
-              <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
-                Sıfırdan yeni bir GNSS nirengi dengelemesi başlatın, TUSAGA-Aktif CORS ve Rover ölçülerinizi tanımlayarak doğrudan veri girişine geçiş yapın.
+              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                Yeni bir GNSS nirengi projesi oluşturun ve istasyon ölçülerinizi tanımlayın.
               </p>
             </div>
           </div>
 
-          <div className="pt-6 flex items-center text-xs font-bold text-sky-600 group-hover:text-sky-700">
+          <div className="pt-4 flex items-center text-xs font-bold text-sky-600 group-hover:text-sky-700">
             <span>Veri Girişine Başla</span>
             <ArrowRight className="w-4 h-4 ml-1.5 group-hover:translate-x-1 transition-transform" />
           </div>
@@ -211,15 +213,15 @@ export const HomeTab: React.FC<HomeTabProps> = ({
         {/* Card 2: Proje Yükle (.json) */}
         <div
           onClick={() => setIsLoadModalOpen(true)}
-          className="group bg-white hover:bg-indigo-50/40 p-6 sm:p-8 rounded-2xl border-2 border-slate-200 hover:border-indigo-500 shadow-xs hover:shadow-md transition-all cursor-pointer flex flex-col justify-between"
+          className="group bg-white hover:bg-indigo-50/40 p-5 sm:p-6 rounded-2xl border-2 border-slate-200 hover:border-indigo-500 shadow-xs hover:shadow-md transition-all cursor-pointer flex flex-col justify-between"
         >
-          <div className="space-y-4">
-            <div className="w-14 h-14 rounded-2xl bg-indigo-100 text-indigo-700 flex items-center justify-center group-hover:scale-105 transition-transform">
-              <FolderOpen className="w-7 h-7" />
+          <div className="space-y-3">
+            <div className="w-12 h-12 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center group-hover:scale-105 transition-transform">
+              <FolderOpen className="w-6 h-6" />
             </div>
             <div>
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-bold text-slate-900 group-hover:text-indigo-700 transition-colors">
+                <h3 className="text-base font-bold text-slate-900 group-hover:text-indigo-700 transition-colors">
                   Proje Yükle (.json)
                 </h3>
                 {savedProjects.length > 0 && (
@@ -228,16 +230,103 @@ export const HomeTab: React.FC<HomeTabProps> = ({
                   </span>
                 )}
               </div>
-              <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
-                Kayıtlı projelerinizi listeleyin, düzenleyin veya bilgisayarınızdan bir .json yedek dosyası seçerek projeyi anında açın.
+              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                Kayıtlı projelerinizi yönetin veya bilgisayarınızdan .json proje dosyası açın.
               </p>
             </div>
           </div>
 
-          <div className="pt-6 flex items-center text-xs font-bold text-indigo-600 group-hover:text-indigo-700">
+          <div className="pt-4 flex items-center text-xs font-bold text-indigo-600 group-hover:text-indigo-700">
             <span>Projeleri İncele ve Aç</span>
             <ArrowRight className="w-4 h-4 ml-1.5 group-hover:translate-x-1 transition-transform" />
           </div>
+        </div>
+      </div>
+
+      {/* Guided 5-Step Survey Workflow Cards */}
+      <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-2">
+            <span>GNSS Dengeleme İş Akışı Adımları</span>
+          </h3>
+          <span className="text-[11px] text-slate-400">Adım adım ilerleyin</span>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 text-xs">
+          <button
+            type="button"
+            onClick={() => onNavigateTab ? onNavigateTab('stations') : onNewProject()}
+            className="p-3 bg-slate-50 hover:bg-sky-50/70 border border-slate-200 hover:border-sky-300 rounded-xl text-left transition cursor-pointer flex flex-col justify-between space-y-1.5 group"
+          >
+            <div className="flex items-center justify-between">
+              <span className="w-6 h-6 rounded-lg bg-sky-100 text-sky-700 font-bold text-[11px] flex items-center justify-center">1</span>
+              <ArrowRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-sky-600 transition" />
+            </div>
+            <div>
+              <div className="font-bold text-slate-900 group-hover:text-sky-700 text-xs">İstasyonlar &amp; RINEX</div>
+              <div className="text-[10px] text-slate-500 mt-0.5">Nokta ve gözlem verileri</div>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onNavigateTab ? onNavigateTab('qc') : onNewProject()}
+            className="p-3 bg-slate-50 hover:bg-indigo-50/70 border border-slate-200 hover:border-indigo-300 rounded-xl text-left transition cursor-pointer flex flex-col justify-between space-y-1.5 group"
+          >
+            <div className="flex items-center justify-between">
+              <span className="w-6 h-6 rounded-lg bg-indigo-100 text-indigo-700 font-bold text-[11px] flex items-center justify-center">2</span>
+              <ArrowRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-600 transition" />
+            </div>
+            <div>
+              <div className="font-bold text-slate-900 group-hover:text-indigo-700 text-xs">Kalite Kontrol (QC)</div>
+              <div className="text-[10px] text-slate-500 mt-0.5">Skyplot ve SNR analizi</div>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onNavigateTab ? onNavigateTab('baselines') : onNewProject()}
+            className="p-3 bg-slate-50 hover:bg-emerald-50/70 border border-slate-200 hover:border-emerald-300 rounded-xl text-left transition cursor-pointer flex flex-col justify-between space-y-1.5 group"
+          >
+            <div className="flex items-center justify-between">
+              <span className="w-6 h-6 rounded-lg bg-emerald-100 text-emerald-700 font-bold text-[11px] flex items-center justify-center">3</span>
+              <ArrowRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-emerald-600 transition" />
+            </div>
+            <div>
+              <div className="font-bold text-slate-900 group-hover:text-emerald-700 text-xs">Baz Çözümleri</div>
+              <div className="text-[10px] text-slate-500 mt-0.5">Bağıl koordinat farkları</div>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onNavigateTab ? onNavigateTab('constrained_adjustment') : onNewProject()}
+            className="p-3 bg-slate-50 hover:bg-amber-50/70 border border-slate-200 hover:border-amber-300 rounded-xl text-left transition cursor-pointer flex flex-col justify-between space-y-1.5 group"
+          >
+            <div className="flex items-center justify-between">
+              <span className="w-6 h-6 rounded-lg bg-amber-100 text-amber-700 font-bold text-[11px] flex items-center justify-center">4</span>
+              <ArrowRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-amber-600 transition" />
+            </div>
+            <div>
+              <div className="font-bold text-slate-900 group-hover:text-amber-700 text-xs">Ağ Dengelemesi</div>
+              <div className="text-[10px] text-slate-500 mt-0.5">Serbest &amp; Dayalı çözüm</div>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onNavigateTab ? onNavigateTab('report') : onNewProject()}
+            className="p-3 bg-slate-50 hover:bg-rose-50/70 border border-slate-200 hover:border-rose-300 rounded-xl text-left transition cursor-pointer flex flex-col justify-between space-y-1.5 group"
+          >
+            <div className="flex items-center justify-between">
+              <span className="w-6 h-6 rounded-lg bg-rose-100 text-rose-700 font-bold text-[11px] flex items-center justify-center">5</span>
+              <ArrowRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-rose-600 transition" />
+            </div>
+            <div>
+              <div className="font-bold text-slate-900 group-hover:text-rose-700 text-xs">Rapor &amp; CAD/CBS</div>
+              <div className="text-[10px] text-slate-500 mt-0.5">BÖHYY karnesi &amp; DXF/KML</div>
+            </div>
+          </button>
         </div>
       </div>
 

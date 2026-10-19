@@ -192,17 +192,11 @@ export const QcSkyplotTab: React.FC<Props> = ({
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2">
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-sky-500/10 text-sky-700 border border-sky-400/20 uppercase">
-                2. Faz: Kalite Kontrol
-              </span>
-              <h2 className="text-lg font-extrabold text-slate-900">
-                2. Faz: Görselleştirme ve Kalite Kontrol (QC &amp; Skyplot)
-              </h2>
-            </div>
-            <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-              PyRINEX ve RTKLIB standartlarında uyduların 24 saatlik kutupsal gökyüzü konumları, 
-              yükseklik maskesi ({maskAngle}°), Sinyal/Gürültü Oranı (SNR) ve çok yolluluk (multipath) denetimi.
+            <h2 className="text-lg font-extrabold text-slate-900">
+              Kalite Kontrol ve Uydu Haritası (Skyplot)
+            </h2>
+            <p className="text-xs text-slate-500 mt-1">
+              Uyduların kutupsal gökyüzü konumları, maske açısı ({maskAngle}°), DOP metrikleri ve sinyal kalitesi (SNR).
             </p>
           </div>
 

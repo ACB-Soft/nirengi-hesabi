@@ -194,8 +194,8 @@ export const ReportExportTab: React.FC<Props> = ({
         <FileText className="w-12 h-12 text-slate-300 mx-auto" />
         <h3 className="text-base font-bold text-slate-800">Dengeleme Hesabı Henüz Çalıştırılmadı</h3>
         <p className="text-xs text-slate-500 max-w-md mx-auto">
-          Resmi BÖHYY dengeleme hesap karnesi ve CAD/CBS dışa aktarımı için 4. Faz "Dayalı Dengeleme" sekmesinden çözümü başlatınız.
-          İstasyonlarınıza ait resmi <strong>Hız Hesabı ve Epok Kaydırma Raporunu</strong> ise doğrudan Excel formatında indirebilirsiniz.
+          Resmi BÖHYY dengeleme hesap karnesi ve CAD/CBS dışa aktarımı için "Dayalı Dengeleme" sekmesinden çözümü çalıştırınız.
+          İstasyonlarınıza ait hız raporunu veya mevcut nokta verilerini doğrudan indirebilirsiniz.
         </p>
         {Object.keys(stations).length > 0 && (
           <div className="pt-2 flex items-center justify-center gap-3 flex-wrap">
@@ -204,21 +204,21 @@ export const ReportExportTab: React.FC<Props> = ({
               className="px-5 py-2.5 text-xs font-bold bg-purple-700 hover:bg-purple-800 text-white rounded-xl shadow-sm transition cursor-pointer inline-flex items-center gap-2"
             >
               <FileSpreadsheet className="w-4 h-4" />
-              <span>Hız Hesabı Raporunu Excel (.xlsx) İndir</span>
+              <span>Hız Hesabı Excel (.xlsx)</span>
             </button>
             <button
               onClick={handleExportNetcadNcn}
               className="px-5 py-2.5 text-xs font-bold bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl shadow-sm transition cursor-pointer inline-flex items-center gap-2"
             >
               <FileCode className="w-4 h-4 text-emerald-300" />
-              <span>Noktaları Netcad (.ncn) İndir</span>
+              <span>Netcad Nokta (.ncn)</span>
             </button>
             <button
               onClick={handleExportDxf}
               className="px-5 py-2.5 text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white rounded-xl shadow-sm transition cursor-pointer inline-flex items-center gap-2"
             >
               <Layers className="w-4 h-4 text-sky-400" />
-              <span>Noktaları DXF (Netcad) İndir</span>
+              <span>Netcad DXF</span>
             </button>
           </div>
         )}
@@ -228,21 +228,15 @@ export const ReportExportTab: React.FC<Props> = ({
 
   return (
     <div className="space-y-6">
-      {/* Top Banner: Phase 5 Header & Export Hub */}
+      {/* Top Banner: Header & Export Hub */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 no-print space-y-4">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2">
-              <span className="bg-rose-100 text-rose-800 text-[10px] font-extrabold px-2.5 py-0.5 rounded border border-rose-300 uppercase">
-                5. Faz: Raporlama &amp; CAD/CBS
-              </span>
-              <h2 className="text-lg font-extrabold text-slate-900">
-                5. Faz: Resmi BÖHYY Dengeleme Karnesi ve CAD/CBS Dışa Aktarım
-              </h2>
-            </div>
-            <p className="text-xs text-slate-500 mt-1 max-w-3xl leading-relaxed">
-              TMMOB Harita ve Kadastro Mühendisleri Odası &amp; BÖHYY standartlarında onaylanabilir resmi hesap karnesi, 
-              Netcad (.NCN / .BAZ / .DXF), Google Earth 3D (.KML), QGIS (.GeoJSON) ve çok sayfalı Excel (.XLSX) dışa aktarımı.
+            <h2 className="text-lg font-extrabold text-slate-900">
+              Resmi Dengeleme Karnesi ve CAD/CBS Dışa Aktarım
+            </h2>
+            <p className="text-xs text-slate-500 mt-1 max-w-2xl leading-relaxed">
+              BÖHYY standartlarında onaylanabilir resmi hesap karnesi; Netcad (.ncn/.baz/.dxf), Google Earth (.kml), GeoJSON ve Excel çıktıları.
             </p>
           </div>
 
