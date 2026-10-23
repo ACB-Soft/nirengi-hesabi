@@ -566,8 +566,8 @@ export function createStationFromSummary(
   const pcoL1 = matched ? matched.pcoL1 : { n: 0, e: 0, u: 65.0 };
   const pcoL2 = matched ? matched.pcoL2 : { n: 0, e: 0, u: 60.0 };
   const pcvZenith = matched ? matched.pcvZenith : [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-  const verticalOffset = matched ? (matched.verticalOffset || pcoL1.u / 1000.0) : (pcoL1.u / 1000.0);
-  const correctedHeight = calculateCorrectedAntennaHeight('vertical', metadata.deltaH, 0.08, verticalOffset);
+  const verticalOffset = matched ? (matched.verticalOffset || 0.0) : 0.0;
+  const correctedHeight = calculateCorrectedAntennaHeight('vertical', metadata.deltaH, matched?.radius || 0.08, 0.0);
 
   const observationEpoch = metadata.surveyEpoch || options.surveyEpoch || 2026.0;
 

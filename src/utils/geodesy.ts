@@ -611,24 +611,116 @@ export function enuToEcef(de: number, dn: number, du: number, latDeg: number, lo
 // ============================================================================
 
 /**
- * Computes ARP / Phase Center vertical antenna height:
- * - Vertical (Pilye): h_arp = measured_h + offset
- * - Slant (Sehpa/Jalon): h_arp = sqrt(R_slant^2 - R_ant^2) + offset
+ * Computes True Vertical Height of the Antenna Reference Point (ARP) above the ground marker.
+ * 
+ * - Vertical measurement (Düşey / Sabit Jalon / Pilye):
+ *   The height is measured directly along the vertical axis from the ground mark to the ARP (bottom of antenna).
+ *   No slant reduction or notch offset applies:
+ *   h_arp = measuredH
+ * 
+ * - Slant measurement (Eğik / Sehpa / Ölçü Çentiği):
+ *   The height is measured from the ground mark to the outer measuring mark / notch (SHMP / bumper).
+ *   R = horizontal distance from vertical antenna axis to the notch.
+ *   notchOffset = vertical distance of the notch ABOVE the ARP plane (pre-amp base).
+ *   By Pythagoras:
+ *   h_notch = sqrt(max(0, s_slant^2 - R^2))
+ *   Since the notch is ABOVE the ARP, we subtract the notch offset to reach the ARP:
+ *   h_arp = h_notch - notchOffset
  */
 export function calculateCorrectedAntennaHeight(
   type: 'vertical' | 'slant',
   measuredH: number,
   radius: number = 0.09,
-  offset: number = 0.0
+  notchOffset: number = 0.0
 ): number {
-  let hVert = measuredH;
-  if (type === 'slant') {
-    if (measuredH * measuredH >= radius * radius) {
-      hVert = Math.sqrt(measuredH * measuredH - radius * radius);
-    }
+  if (type === 'vertical') {
+    return Math.max(0, Number(measuredH.toFixed(4)));
   }
-  // Add vertical offset (L1 PCO Up / ARP phase offset)
-  return Math.max(0, Number((hVert + offset).toFixed(4)));
+  const radSq = radius * radius;
+  const measSq = measuredH * measuredH;
+  const hNotch = measSq >= radSq ? Math.sqrt(measSq - radSq) : measuredH;
+  // Subtract notch offset to reach the ARP reference plane
+  const hArp = Math.max(0, hNotch - (notchOffset || 0));
+  return Number(hArp.toFixed(4));
+}
+
+export interface AntennaPhaseCenterResult {
+  hArp: number; // Pure vertical height of ARP above ground marker (m)
+  pcoL1_Up_mm: number; // PCO Up for L1 (G01) in mm
+  pcoL2_Up_mm: number; // PCO Up for L2 (G02) in mm
+  pcoL3_Up_mm: number; // PCO Up for Ionosphere-Free LC (L3) in mm
+  pcoL1_Up_m: number;
+  pcoL2_Up_m: number;
+  pcoL3_Up_m: number;
+  pcoUpM: number;
+  hApcL1: number; // Ground to L1 APC: h_ARP + PCO_L1 (m)
+  hApcL2: number; // Ground to L2 APC: h_ARP + PCO_L2 (m)
+  hApcL3: number; // Ground to L3/LC APC: h_ARP + PCO_L3 (m)
+  hApc: number; // Selected frequency APC height above ground (m)
+}
+
+/**
+ * Computes Antenna Reference Point (ARP) and Antenna Phase Center (APC) heights above ground marker
+ * conforming strictly to IGS ANTEX 1.4 Section 3:
+ * "mean phase center position = ARP (antenna reference point) position + phase center offset vector (North, East, Up)"
+ * 
+ * - L1 (G01): h_apc(L1) = h_arp + PCO_Up(L1)
+ * - L2 (G02): h_apc(L2) = h_arp + PCO_Up(L2)
+ * - L3 (LC / Ionosphere-Free):
+ *   c1 = f1^2 / (f1^2 - f2^2) = 2.545728
+ *   c2 = f2^2 / (f1^2 - f2^2) = 1.545728
+ *   PCO_Up(L3) = c1 * PCO_Up(L1) - c2 * PCO_Up(L2)
+ *   h_apc(L3) = h_arp + PCO_Up(L3)
+ */
+export function calculateAntennaPhaseCenterHeight(
+  type: 'vertical' | 'slant',
+  measuredH: number,
+  radius: number = 0.09,
+  notchOffset: number = 0.0,
+  pcoL1_Up_mm: number = 89.35,
+  pcoL2_Up_mm: number = 117.76,
+  freq: 'L1' | 'L2' | 'L3' = 'L3'
+): AntennaPhaseCenterResult {
+  const hArp = calculateCorrectedAntennaHeight(type, measuredH, radius, notchOffset);
+
+  // Exact IGS GPS dual-frequency Ionosphere-Free combination coefficients:
+  // f1 = 1575.42 MHz, f2 = 1227.60 MHz
+  const c1 = 2.545728;
+  const c2 = 1.545728;
+  const pcoL3_Up_mm = c1 * pcoL1_Up_mm - c2 * pcoL2_Up_mm;
+
+  const pcoL1_Up_m = Number((pcoL1_Up_mm / 1000.0).toFixed(5));
+  const pcoL2_Up_m = Number((pcoL2_Up_mm / 1000.0).toFixed(5));
+  const pcoL3_Up_m = Number((pcoL3_Up_mm / 1000.0).toFixed(5));
+
+  const hApcL1 = Number((hArp + pcoL1_Up_m).toFixed(4));
+  const hApcL2 = Number((hArp + pcoL2_Up_m).toFixed(4));
+  const hApcL3 = Number((hArp + pcoL3_Up_m).toFixed(4));
+
+  let pcoUpM = pcoL3_Up_m;
+  let hApc = hApcL3;
+  if (freq === 'L1') {
+    pcoUpM = pcoL1_Up_m;
+    hApc = hApcL1;
+  } else if (freq === 'L2') {
+    pcoUpM = pcoL2_Up_m;
+    hApc = hApcL2;
+  }
+
+  return {
+    hArp,
+    pcoL1_Up_mm,
+    pcoL2_Up_mm,
+    pcoL3_Up_mm: Number(pcoL3_Up_mm.toFixed(2)),
+    pcoL1_Up_m,
+    pcoL2_Up_m,
+    pcoL3_Up_m,
+    pcoUpM,
+    hApcL1,
+    hApcL2,
+    hApcL3,
+    hApc,
+  };
 }
 
 /**
@@ -867,9 +959,9 @@ export function parseRinexHeader(rinexText: string, fileName?: string): Partial<
   const pcoL2 = matchedCal ? matchedCal.pcoL2 : { n: 0.9, e: -0.2, u: 82.1 };
   const pcvZenith = matchedCal ? matchedCal.pcvZenith : [0, 0.6, 1.4, 2.5, 4.1];
   const radius = matchedCal ? matchedCal.radius : 0.095;
-  const verticalOffset = matchedCal ? (matchedCal.verticalOffset || matchedCal.pcoL1.u / 1000.0) : (pcoL1.u / 1000.0);
+  const verticalOffset = matchedCal ? (matchedCal.verticalOffset || 0.0) : 0.0;
   const finalModel = matchedCal ? matchedCal.model : (antennaModel || 'TRM59800.00     NONE');
-  const correctedHeight = calculateCorrectedAntennaHeight('vertical', deltaH, radius, verticalOffset);
+  const correctedHeight = calculateCorrectedAntennaHeight('vertical', deltaH, radius, 0.0);
 
   // Parse Detailed Occupation View Tracking Data (Epochs & Satellites)
   const occupation = parseRinexOccupationData(rinexText, stationName, fileName || stationName, endHeaderIdx, detectedDateStr, detectedEpoch);
@@ -2267,6 +2359,19 @@ export function perform3DNetworkAdjustment(
 
         const sigmaH_mm = Math.sqrt(varU) * 1.96 * 1000.0;
 
+        const apcCalc = calculateAntennaPhaseCenterHeight(
+          origSt.antenna?.heightType || 'vertical',
+          origSt.antenna?.measuredHeight || 0,
+          origSt.antenna?.radius || 0.09,
+          origSt.antenna?.verticalOffset || 0,
+          origSt.antenna?.pcoL1?.u ?? 89.35,
+          origSt.antenna?.pcoL2?.u ?? 117.76,
+          'L3'
+        );
+        const groundH = geo.h;
+        const arpH = Number((groundH + apcCalc.hArp).toFixed(4));
+        const apcH = Number((groundH + apcCalc.hApcL3).toFixed(4));
+
         adjustedStations[id] = {
           ...origSt,
           adjustedX: adjCoord.x,
@@ -2274,7 +2379,10 @@ export function perform3DNetworkAdjustment(
           adjustedZ: adjCoord.z,
           adjustedLat: geo.lat,
           adjustedLon: geo.lon,
-          adjustedH: geo.h,
+          adjustedH: groundH,
+          groundH,
+          arpH,
+          apcH,
           adjustedProjY: tm.projY,
           adjustedProjX: tm.projX,
           sigmaX: sigmaX_mm,
@@ -2291,6 +2399,19 @@ export function perform3DNetworkAdjustment(
         };
       } else {
         // Fixed datum station (zero adjustment dispersion)
+        const apcCalc = calculateAntennaPhaseCenterHeight(
+          origSt.antenna?.heightType || 'vertical',
+          origSt.antenna?.measuredHeight || 0,
+          origSt.antenna?.radius || 0.09,
+          origSt.antenna?.verticalOffset || 0,
+          origSt.antenna?.pcoL1?.u ?? 89.35,
+          origSt.antenna?.pcoL2?.u ?? 117.76,
+          'L3'
+        );
+        const groundH = geo.h;
+        const arpH = Number((groundH + apcCalc.hArp).toFixed(4));
+        const apcH = Number((groundH + apcCalc.hApcL3).toFixed(4));
+
         adjustedStations[id] = {
           ...origSt,
           adjustedX: adjCoord.x,
@@ -2298,7 +2419,10 @@ export function perform3DNetworkAdjustment(
           adjustedZ: adjCoord.z,
           adjustedLat: geo.lat,
           adjustedLon: geo.lon,
-          adjustedH: geo.h,
+          adjustedH: groundH,
+          groundH,
+          arpH,
+          apcH,
           adjustedProjY: tm.projY,
           adjustedProjX: tm.projX,
           sigmaX: 0.0,
@@ -3177,15 +3301,24 @@ export function generateBaselinesFromStations(stations: Record<string, Station>)
 
   // Helper to compute ENU antenna offset (ARP height + Iono-Free PCO)
   function getAntennaEcefOffset(st: Station): { dx: number; dy: number; dz: number } {
-    const pcoL1 = st.antenna.pcoL1 || { n: 1.1, e: -0.3, u: 89.2 };
-    const pcoL2 = st.antenna.pcoL2 || { n: 0.9, e: -0.2, u: 82.1 };
+    const pcoL1 = st.antenna.pcoL1 || { n: 0.65, e: 1.35, u: 89.35 };
+    const pcoL2 = st.antenna.pcoL2 || { n: -0.24, e: 0.00, u: 117.76 };
 
-    // Iono-Free (L3) PCO combination (m)
-    const pcoE_m = (2.546 * pcoL1.e - 1.546 * pcoL2.e) / 1000.0;
-    const pcoN_m = (2.546 * pcoL1.n - 1.546 * pcoL2.n) / 1000.0;
-    const pcoU_m = (2.546 * pcoL1.u - 1.546 * pcoL2.u) / 1000.0;
+    // Iono-Free (L3 / LC) PCO combination (m) conforming to IGS GPS standards:
+    const c1 = 2.545728;
+    const c2 = 1.545728;
+    const pcoE_m = (c1 * pcoL1.e - c2 * pcoL2.e) / 1000.0;
+    const pcoN_m = (c1 * pcoL1.n - c2 * pcoL2.n) / 1000.0;
+    const pcoU_m = (c1 * pcoL1.u - c2 * pcoL2.u) / 1000.0;
 
-    const totalUp_m = (st.antenna.correctedHeight || 0.0) + pcoU_m;
+    // Calculate pure vertical ARP height (without PCO)
+    const arpHeightM = calculateCorrectedAntennaHeight(
+      st.antenna.heightType,
+      st.antenna.measuredHeight,
+      st.antenna.radius,
+      st.antenna.verticalOffset
+    );
+    const totalUp_m = arpHeightM + pcoU_m;
 
     // Transform ENU offset to ECEF
     const phi = degToRad(st.lat);

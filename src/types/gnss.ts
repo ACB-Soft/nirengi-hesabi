@@ -167,7 +167,10 @@ export interface Station {
   adjustedZ?: number;
   adjustedLat?: number;
   adjustedLon?: number;
-  adjustedH?: number;
+  adjustedH?: number; // Ground marker ellipsoidal height (m) - alet yüksekliği düşülmüş
+  groundH?: number; // Zemin noktası elipsoidal kotu (m)
+  arpH?: number; // Anten Referans Noktası (ARP) kotu (m)
+  apcH?: number; // Anten Faz Merkezi (APC L3) kotu (m)
   adjustedProjY?: number;
   adjustedProjX?: number;
   sigmaX?: number; // mm

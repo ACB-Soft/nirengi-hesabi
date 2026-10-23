@@ -11,7 +11,7 @@
  */
 
 import { BaselineVector, Station, SolutionStatus } from '../types/gnss';
-import { degToRad } from './geodesy';
+import { degToRad, calculateCorrectedAntennaHeight } from './geodesy';
 
 export interface RtklibProcessingOptions {
   frequencies?: 'L1' | 'L1+L2' | 'Multi-GNSS';
@@ -62,15 +62,24 @@ export interface DoubleDifferenceSolution {
  * Computes antenna Phase Center Offset (PCO) + ARP Height in ECEF frame
  */
 export function computeAntennaEcefOffset(st: Station): { dx: number; dy: number; dz: number } {
-  const pcoL1 = st.antenna.pcoL1 || { n: 1.1, e: -0.3, u: 89.2 };
-  const pcoL2 = st.antenna.pcoL2 || { n: 0.9, e: -0.2, u: 82.1 };
+  const pcoL1 = st.antenna.pcoL1 || { n: 0.65, e: 1.35, u: 89.35 };
+  const pcoL2 = st.antenna.pcoL2 || { n: -0.24, e: 0.00, u: 117.76 };
 
-  // Ionosphere-Free combination for L1/L2
-  const pcoE_m = (2.546 * pcoL1.e - 1.546 * pcoL2.e) / 1000.0;
-  const pcoN_m = (2.546 * pcoL1.n - 1.546 * pcoL2.n) / 1000.0;
-  const pcoU_m = (2.546 * pcoL1.u - 1.546 * pcoL2.u) / 1000.0;
+  // Ionosphere-Free combination for L1/L2 conforming to IGS GPS standards
+  const c1 = 2.545728;
+  const c2 = 1.545728;
+  const pcoE_m = (c1 * pcoL1.e - c2 * pcoL2.e) / 1000.0;
+  const pcoN_m = (c1 * pcoL1.n - c2 * pcoL2.n) / 1000.0;
+  const pcoU_m = (c1 * pcoL1.u - c2 * pcoL2.u) / 1000.0;
 
-  const totalUp_m = (st.antenna.correctedHeight || 0.0) + pcoU_m;
+  // Pure vertical ARP height
+  const arpHeightM = calculateCorrectedAntennaHeight(
+    st.antenna.heightType,
+    st.antenna.measuredHeight,
+    st.antenna.radius,
+    st.antenna.verticalOffset
+  );
+  const totalUp_m = arpHeightM + pcoU_m;
 
   const phi = degToRad(st.lat);
   const lam = degToRad(st.lon);

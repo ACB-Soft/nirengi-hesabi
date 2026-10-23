@@ -31,7 +31,7 @@ export const NOAA_ANTCAL_CATALOG: NoaaAntennaCalibration[] = [
     radome: 'NONE',
     category: 'Rover / SmartAntenna',
     radius: 0.080,
-    verticalOffset: 0.0773, // 77.3 mm L1 PCO Up
+    verticalOffset: 0.030, // 30 mm notch offset to ARP for slant measurement
     pcoL1: { n: 0.00, e: 0.00, u: 77.30 },
     pcoL2: { n: 0.00, e: 0.00, u: 75.80 },
     pcvZenith: [0.0, 0.5, 1.2, 2.2, 3.8, 5.5, 7.2],
@@ -43,7 +43,7 @@ export const NOAA_ANTCAL_CATALOG: NoaaAntennaCalibration[] = [
     radome: 'NONE',
     category: 'Rover / SmartAntenna',
     radius: 0.080,
-    verticalOffset: 0.0750,
+    verticalOffset: 0.030, // 30 mm notch offset to ARP for slant measurement
     pcoL1: { n: 0.00, e: 0.00, u: 75.00 },
     pcoL2: { n: 0.00, e: 0.00, u: 73.50 },
     pcvZenith: [0.0, 0.5, 1.2, 2.2, 3.8, 5.5, 7.2],
@@ -60,8 +60,8 @@ export const NOAA_ANTCAL_CATALOG: NoaaAntennaCalibration[] = [
     category: 'CORS / Choke Ring',
     radius: 0.170,
     verticalOffset: 0.000,
-    pcoL1: { n: 1.10, e: -0.32, u: 89.20 },
-    pcoL2: { n: 0.88, e: -0.19, u: 82.10 },
+    pcoL1: { n: 0.65, e: 1.35, u: 89.35 },
+    pcoL2: { n: -0.24, e: 0.00, u: 117.76 },
     pcvZenith: [0.0, 0.5, 1.2, 2.1, 3.4, 4.8, 6.2],
   },
   {
@@ -571,7 +571,7 @@ export const NOAA_ANTCAL_CATALOG: NoaaAntennaCalibration[] = [
     radome: 'NONE',
     category: 'Rover / SmartAntenna',
     radius: 0.075,
-    verticalOffset: 0.134,
+    verticalOffset: 0.065, // 65 mm antenna base offset for slant measurement
     pcoL1: { n: 0.65, e: -0.10, u: 140.00 },
     pcoL2: { n: 0.45, e: -0.05, u: 132.50 },
     pcvZenith: [0.0, 0.7, 1.8, 3.0, 4.5, 6.2, 8.2],
@@ -583,7 +583,7 @@ export const NOAA_ANTCAL_CATALOG: NoaaAntennaCalibration[] = [
     radome: 'NONE',
     category: 'Rover / SmartAntenna',
     radius: 0.075,
-    verticalOffset: 0.134,
+    verticalOffset: 0.065, // 65 mm antenna base offset for slant measurement
     pcoL1: { n: 0.68, e: -0.08, u: 141.20 },
     pcoL2: { n: 0.48, e: -0.04, u: 133.40 },
     pcvZenith: [0.0, 0.6, 1.7, 2.9, 4.3, 6.0, 7.9],

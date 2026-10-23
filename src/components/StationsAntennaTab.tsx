@@ -22,6 +22,7 @@ import {
 import { JobConfigTab } from './JobConfigTab';
 import {
   calculateCorrectedAntennaHeight,
+  calculateAntennaPhaseCenterHeight,
   parseRinexHeader,
   parseAntexFile,
   getGpsWeekDay,
@@ -225,22 +226,40 @@ export const StationsAntennaTab: React.FC<Props> = ({
   const handleSaveEditModal = () => {
     if (!editStation) return;
 
+    const isSlant = editHeightType === 'slant';
+    const effectiveOffset = isSlant ? editOffset : 0;
     const corrected = calculateCorrectedAntennaHeight(
       editHeightType,
       editMeasuredH,
       editRadius,
-      editOffset
+      effectiveOffset
     );
+
+    const pcoL1_u = editStation.antenna?.pcoL1?.u ?? 89.35;
+    const pcoL2_u = editStation.antenna?.pcoL2?.u ?? 117.76;
+    const apcCalc = calculateAntennaPhaseCenterHeight(
+      editHeightType,
+      editMeasuredH,
+      editRadius,
+      effectiveOffset,
+      pcoL1_u,
+      pcoL2_u,
+      'L3'
+    );
+    const baseGroundH = editStation.groundH ?? editStation.h;
 
     const updated: Station = {
       ...editStation,
       name: editName.trim() || editStation.name,
+      groundH: baseGroundH,
+      arpH: Number((baseGroundH + apcCalc.hArp).toFixed(4)),
+      apcH: Number((baseGroundH + apcCalc.hApcL3).toFixed(4)),
       antenna: {
         ...editStation.antenna,
         measuredHeight: editMeasuredH,
         heightType: editHeightType,
-        radius: editRadius,
-        verticalOffset: editOffset,
+        radius: isSlant ? editRadius : 0,
+        verticalOffset: effectiveOffset,
         correctedHeight: corrected,
       },
     };
@@ -535,22 +554,38 @@ export const StationsAntennaTab: React.FC<Props> = ({
 
   const handleSelectNoaaAntenna = (stationId: string, ant: NoaaAntennaCalibration) => {
     const targetSt = stations[stationId];
-    if (!targetSt) return;
-
+    const isSlant = targetSt.antenna.heightType === 'slant';
+    const effectiveOffset = isSlant ? (ant.verticalOffset || 0) : 0;
     const corrected = calculateCorrectedAntennaHeight(
       targetSt.antenna.heightType,
       targetSt.antenna.measuredHeight,
       ant.radius,
-      ant.verticalOffset
+      effectiveOffset
     );
+
+    const pcoL1_u = ant.pcoL1?.u ?? 89.35;
+    const pcoL2_u = ant.pcoL2?.u ?? 117.76;
+    const apcCalc = calculateAntennaPhaseCenterHeight(
+      targetSt.antenna?.heightType || 'vertical',
+      targetSt.antenna?.measuredHeight || 0,
+      ant.radius,
+      effectiveOffset,
+      pcoL1_u,
+      pcoL2_u,
+      'L3'
+    );
+    const baseGroundH = targetSt.groundH ?? targetSt.h;
 
     const updated: Station = {
       ...targetSt,
+      groundH: baseGroundH,
+      arpH: Number((baseGroundH + apcCalc.hArp).toFixed(4)),
+      apcH: Number((baseGroundH + apcCalc.hApcL3).toFixed(4)),
       antenna: {
         ...targetSt.antenna,
         model: ant.model,
         radius: ant.radius,
-        verticalOffset: ant.verticalOffset,
+        verticalOffset: effectiveOffset,
         correctedHeight: corrected,
         pcoL1: ant.pcoL1,
         pcoL2: ant.pcoL2,
@@ -1203,34 +1238,115 @@ export const StationsAntennaTab: React.FC<Props> = ({
 
               <div className="grid grid-cols-2 gap-2 text-[11px]">
                 <div>
-                  <label className="block text-slate-600 font-medium mb-1">Anten Yarıçapı R (m)</label>
+                  <label className="block text-slate-600 font-medium mb-1">
+                    Anten Yarıçapı R (m) {editHeightType === 'slant' && <span className="text-amber-700 font-bold">*</span>}
+                  </label>
                   <input
                     type="number"
                     step="0.001"
                     value={editRadius}
                     onChange={(e) => setEditRadius(parseFloat(e.target.value) || 0)}
-                    className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-mono"
+                    disabled={editHeightType === 'vertical'}
+                    className={`w-full px-2.5 py-1.5 border rounded font-mono ${
+                      editHeightType === 'vertical' ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed' : 'bg-white border-slate-300'
+                    }`}
                   />
+                  {editHeightType === 'vertical' && (
+                    <span className="text-[10px] text-slate-400 mt-0.5 block">Düşey ölçüde yarıçap kullanılmaz</span>
+                  )}
                 </div>
                 <div>
-                  <label className="block text-slate-600 font-medium mb-1">ARP Dikey Ofset (m)</label>
+                  <label className="block text-slate-600 font-medium mb-1">
+                    {editHeightType === 'slant' ? 'Çentik Düşey Ofseti Δh (m)' : 'İlave Düşey Ofset (m)'}
+                  </label>
                   <input
                     type="number"
                     step="0.001"
                     value={editOffset}
                     onChange={(e) => setEditOffset(parseFloat(e.target.value) || 0)}
-                    className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-mono"
+                    disabled={editHeightType === 'vertical'}
+                    className={`w-full px-2.5 py-1.5 border rounded font-mono ${
+                      editHeightType === 'vertical' ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed' : 'bg-white border-slate-300'
+                    }`}
                   />
+                  {editHeightType === 'vertical' && (
+                    <span className="text-[10px] text-slate-400 mt-0.5 block">Düşeyde h_ARP = h_ölçü</span>
+                  )}
                 </div>
               </div>
 
-              {/* Calculated ARP Height Preview */}
-              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between">
-                <span className="font-bold text-emerald-900">Hesaplanan Dik ARP Yüksekliği:</span>
-                <span className="font-mono font-bold text-sm text-emerald-800">
-                  {calculateCorrectedAntennaHeight(editHeightType, editMeasuredH, editRadius, editOffset).toFixed(4)} m
-                </span>
-              </div>
+              {/* Calculated ARP & APC Height Preview strictly conforming to IGS ANTEX 1.4 Section 3 */}
+              {(() => {
+                const isSlant = editHeightType === 'slant';
+                const pcoL1_u = editStation?.antenna?.pcoL1?.u ?? 89.35;
+                const pcoL2_u = editStation?.antenna?.pcoL2?.u ?? 117.76;
+                const apcCalc = calculateAntennaPhaseCenterHeight(
+                  editHeightType,
+                  editMeasuredH,
+                  editRadius,
+                  isSlant ? editOffset : 0,
+                  pcoL1_u,
+                  pcoL2_u,
+                  'L3'
+                );
+
+                return (
+                  <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5 text-xs">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+                      <div>
+                        <span className="font-bold text-slate-800 block">1. Dik ARP Yüksekliği (h_ARP):</span>
+                        <span className="text-[10px] text-slate-500 font-mono">
+                          {isSlant ? '√(s² - R²) - Δh_çentik' : 'Doğrudan Düşey Jalon/Pilye'}
+                        </span>
+                      </div>
+                      <span className="font-mono text-sm font-extrabold text-slate-900 bg-white px-2 py-0.5 rounded border border-slate-200">
+                        {apcCalc.hArp.toFixed(4)} m
+                      </span>
+                    </div>
+
+                    <div className="space-y-1.5 text-[11px]">
+                      <div className="font-bold text-slate-700 flex items-center justify-between">
+                        <span>2. IGS ANTEX 1.4 Faz Merkezi Yükseklikleri (h_APC = h_ARP + PCO_Up):</span>
+                      </div>
+
+                      {/* L1 (G01) */}
+                      <div className="flex items-center justify-between pl-2 font-mono">
+                        <span className="text-slate-600 font-sans">
+                          • L1 (G01) [PCO Up: +{apcCalc.pcoL1_Up_mm.toFixed(1)} mm]:
+                        </span>
+                        <span className="font-bold text-sky-800">
+                          {apcCalc.hApcL1.toFixed(4)} m
+                        </span>
+                      </div>
+
+                      {/* L2 (G02) */}
+                      <div className="flex items-center justify-between pl-2 font-mono">
+                        <span className="text-slate-600 font-sans">
+                          • L2 (G02) [PCO Up: +{apcCalc.pcoL2_Up_mm.toFixed(1)} mm]:
+                        </span>
+                        <span className="font-bold text-indigo-800">
+                          {apcCalc.hApcL2.toFixed(4)} m
+                        </span>
+                      </div>
+
+                      {/* L3 / LC Ionosphere-Free */}
+                      <div className="flex items-center justify-between pl-2 font-mono bg-emerald-50/80 p-1.5 rounded border border-emerald-200">
+                        <span className="text-emerald-900 font-sans font-semibold">
+                          • LC / L3 (İyonosfersiz) [PCO: +{apcCalc.pcoL3_Up_mm.toFixed(1)} mm]:
+                        </span>
+                        <span className="font-bold text-emerald-800 text-xs">
+                          {apcCalc.hApcL3.toFixed(4)} m
+                        </span>
+                      </div>
+                    </div>
+
+                    <p className="text-[10px] text-slate-500 leading-tight pt-1 border-t border-slate-200">
+                      * <strong>IGS ANTEX 1.4 (Bölüm 3)</strong> standardına göre ortalama faz merkezi konumu: 
+                      <span className="font-mono text-purple-700"> r_APC = r_ARP + PCO</span> (Kuzey, Doğu, Yukarı) bağıntısıyla hesaplanır.
+                    </p>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Modal Footer */}

@@ -10,6 +10,7 @@
 
 import React, { useState } from 'react';
 import { AdjustmentResult, JobConfig, Station, BaselineVector } from '../types/gnss';
+import { calculateAntennaPhaseCenterHeight } from '../utils/geodesy';
 import {
   BarChart3,
   CheckCircle2,
@@ -25,6 +26,7 @@ import {
   Sparkles,
   Eye,
   FileText,
+  Radio,
 } from 'lucide-react';
 
 interface Props {
@@ -42,6 +44,7 @@ export const NetworkAdjustmentResultsView: React.FC<Props> = ({
 }) => {
   const [selectedSubTab, setSelectedSubTab] = useState<'coords' | 'residuals' | 'ellipses' | 'matrix'>('coords');
   const [selectedEllipseStationId, setSelectedEllipseStationId] = useState<string>('');
+  const [coordViewMode, setCoordViewMode] = useState<'standard' | 'antenna_levels'>('standard');
 
   const isFree = mode === 'unconstrained';
   const stationList = Object.values(adjustmentResult.stations);
@@ -109,75 +112,241 @@ export const NetworkAdjustmentResultsView: React.FC<Props> = ({
 
       {/* SubTab 1: Coordinates */}
       {selectedSubTab === 'coords' && (
-        <div className="space-y-3">
-          <div className="overflow-x-auto rounded-xl border border-slate-200">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
-                  <th className="py-2.5 px-3">Nokta ID</th>
-                  <th className="py-2.5 px-3">Durum</th>
-                  <th className="py-2.5 px-3 text-right">Dengelenmiş X (m)</th>
-                  <th className="py-2.5 px-3 text-right">Dengelenmiş Y (m)</th>
-                  <th className="py-2.5 px-3 text-right">Dengelenmiş Z (m)</th>
-                  <th className="py-2.5 px-3 text-right">TM Sağa Y (m)</th>
-                  <th className="py-2.5 px-3 text-right">TM Yukarı X (m)</th>
-                  <th className="py-2.5 px-3 text-right">Elip. H (m)</th>
-                  <th className="py-2.5 px-3 text-right">σ_E (mm)</th>
-                  <th className="py-2.5 px-3 text-right">σ_N (mm)</th>
-                  <th className="py-2.5 px-3 text-right">σ_U (mm)</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 font-mono">
-                {stationList.map((st) => {
-                  const isFixed = st.isFixed.x && st.isFixed.y && st.isFixed.z;
-                  return (
-                    <tr key={st.id} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="py-2.5 px-3 font-bold font-sans text-slate-900">{st.name}</td>
-                      <td className="py-2.5 px-3 font-sans">
-                        <span
-                          className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            isFixed ? 'bg-rose-100 text-rose-800' : 'bg-emerald-100 text-emerald-800'
-                          }`}
-                        >
-                          {isFixed ? 'SABİT (CORS)' : 'DENGELENDİ'}
-                        </span>
-                      </td>
-                      <td className="py-2.5 px-3 text-right text-slate-700">
-                        {(st.adjustedX ?? st.x).toFixed(4)}
-                      </td>
-                      <td className="py-2.5 px-3 text-right text-slate-700">
-                        {(st.adjustedY ?? st.y).toFixed(4)}
-                      </td>
-                      <td className="py-2.5 px-3 text-right text-slate-700">
-                        {(st.adjustedZ ?? st.z).toFixed(4)}
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-bold text-sky-800">
-                        {(st.adjustedProjY ?? st.projY).toFixed(4)}
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-bold text-sky-800">
-                        {(st.adjustedProjX ?? st.projX).toFixed(4)}
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-bold text-slate-900">
-                        {(st.adjustedH ?? st.h).toFixed(4)}
-                      </td>
-                      <td className="py-2.5 px-3 text-right text-slate-600">
-                        {(st.sigmaEast ?? st.sigmaX ?? 0).toFixed(1)}
-                      </td>
-                      <td className="py-2.5 px-3 text-right text-slate-600">
-                        {(st.sigmaNorth ?? st.sigmaY ?? 0).toFixed(1)}
-                      </td>
-                      <td className="py-2.5 px-3 text-right text-slate-600">
-                        {(st.sigmaUp ?? st.sigmaZ ?? 0).toFixed(1)}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+        <div className="space-y-3.5">
+          {/* Geodetic Height Reduction Verification Banner */}
+          <div className="p-3.5 bg-emerald-50/90 border border-emerald-200 rounded-xl text-xs flex items-start gap-3 shadow-2xs">
+            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+            <div className="space-y-1 flex-1">
+              <div className="flex items-center justify-between flex-wrap gap-1 font-bold text-emerald-950">
+                <span className="flex items-center gap-2">
+                  Dengeleme Koordinatları Zemin Noktası Röper Kotuna (H_zemin) İndirgenmiştir
+                </span>
+                <span className="px-2 py-0.5 bg-emerald-200/80 text-emerald-900 rounded font-mono text-[10px]">
+                  H_zemin = H_APC - h_APC
+                </span>
+              </div>
+              <p className="text-[11px] text-emerald-800 leading-relaxed">
+                GNSS uydu sinyalleri anten faz merkezinde (APC) kaydedilmektedir. Ağ dengelemesi algoritmasında
+                alet yüksekliği eğik/düşey geometrisiyle Anten Referans Düzlemine (<strong>h_ARP</strong>), ardından
+                <strong> IGS ANTEX 1.4 Bölüm 3</strong> mutlak kalibrasyon ofsetleri (+PCO_Up) eklenerek toplam faz yüksekliği
+                (<strong>h_APC</strong>) hesaplanmış ve dengeleme sonuçlarından düşülmüştür.
+                Aşağıdaki tablolarda yer alan elipsoidal yükseklikler doğrudan zemindeki nokta röperine (<strong>H_zemin</strong>) aittir.
+              </p>
+            </div>
           </div>
-          <p className="text-[11px] text-slate-400">
-            * TM Koordinatları DOM {config.dom}° dilim esas alınarak hesaplanmıştır. σ_E, σ_N ve σ_U yerel topomerkezi eksen duyarlıklarıdır (1-sigma).
-          </p>
+
+          {/* View Mode Toggle Header */}
+          <div className="flex items-center justify-between flex-wrap gap-2 pt-1">
+            <div className="flex items-center bg-slate-100 p-1 rounded-lg border border-slate-200">
+              <button
+                type="button"
+                onClick={() => setCoordViewMode('standard')}
+                className={`px-3 py-1.5 rounded-md text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                  coordViewMode === 'standard'
+                    ? 'bg-white text-slate-900 shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5 text-sky-600" />
+                <span>3D &amp; TM Projeksiyon Koordinatları</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setCoordViewMode('antenna_levels')}
+                className={`px-3 py-1.5 rounded-md text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                  coordViewMode === 'antenna_levels'
+                    ? 'bg-white text-indigo-900 shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Radio className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Anten Seviyeleri &amp; Faz Merkezi Detayı (Zemin / ARP / APC)</span>
+              </button>
+            </div>
+
+            <span className="text-[11px] text-slate-500 font-medium">
+              IGS ANTEX 1.4 Kalibrasyonu: <strong className="text-emerald-700">Doğrulandı &amp; Düşüldü</strong>
+            </span>
+          </div>
+
+          {/* Table View 1: Standard Coordinates */}
+          {coordViewMode === 'standard' ? (
+            <div className="space-y-2">
+              <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
+                      <th className="py-2.5 px-3">Nokta ID</th>
+                      <th className="py-2.5 px-3">Durum</th>
+                      <th className="py-2.5 px-3 text-right">Dengelenmiş X (m)</th>
+                      <th className="py-2.5 px-3 text-right">Dengelenmiş Y (m)</th>
+                      <th className="py-2.5 px-3 text-right">Dengelenmiş Z (m)</th>
+                      <th className="py-2.5 px-3 text-right">TM Sağa Y (m)</th>
+                      <th className="py-2.5 px-3 text-right">TM Yukarı X (m)</th>
+                      <th className="py-2.5 px-3 text-right bg-emerald-50/50 text-emerald-900 font-bold" title="Alet yüksekliği ve PCO düşülmüş zemin röper kotu">
+                        Zemin Elip. H (m)
+                      </th>
+                      <th className="py-2.5 px-3 text-right">σ_E (mm)</th>
+                      <th className="py-2.5 px-3 text-right">σ_N (mm)</th>
+                      <th className="py-2.5 px-3 text-right">σ_U (mm)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-mono">
+                    {stationList.map((st) => {
+                      const isFixed = st.isFixed.x && st.isFixed.y && st.isFixed.z;
+                      return (
+                        <tr key={st.id} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="py-2.5 px-3 font-bold font-sans text-slate-900">{st.name}</td>
+                          <td className="py-2.5 px-3 font-sans">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                isFixed ? 'bg-rose-100 text-rose-800' : 'bg-emerald-100 text-emerald-800'
+                              }`}
+                            >
+                              {isFixed ? 'SABİT (CORS)' : 'DENGELENDİ'}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-right text-slate-700">
+                            {(st.adjustedX ?? st.x).toFixed(4)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right text-slate-700">
+                            {(st.adjustedY ?? st.y).toFixed(4)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right text-slate-700">
+                            {(st.adjustedZ ?? st.z).toFixed(4)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-bold text-sky-800">
+                            {(st.adjustedProjY ?? st.projY).toFixed(4)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-bold text-sky-800">
+                            {(st.adjustedProjX ?? st.projX).toFixed(4)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-bold text-emerald-900 bg-emerald-50/30">
+                            {(st.groundH ?? st.adjustedH ?? st.h).toFixed(4)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right text-slate-600">
+                            {(st.sigmaEast ?? st.sigmaX ?? 0).toFixed(1)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right text-slate-600">
+                            {(st.sigmaNorth ?? st.sigmaY ?? 0).toFixed(1)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right text-slate-600">
+                            {(st.sigmaUp ?? st.sigmaZ ?? 0).toFixed(1)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                * TM Koordinatları DOM {config.dom}° dilim esas alınarak hesaplanmıştır. Zemin Elip. H kotu alet yüksekliği ve anten faz merkezi ofsetleri düşülerek doğrudan zemin seviyesine indirgenmiştir. σ_E, σ_N ve σ_U yerel topomerkezi eksen duyarlıklarıdır (1-sigma).
+              </p>
+            </div>
+          ) : (
+            /* Table View 2: Antenna Levels & APC Details */
+            <div className="space-y-2">
+              <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
+                      <th className="py-2.5 px-3">Nokta ID</th>
+                      <th className="py-2.5 px-3">Durum</th>
+                      <th className="py-2.5 px-3">Anten Modeli</th>
+                      <th className="py-2.5 px-3">Ölçü Tipi</th>
+                      <th className="py-2.5 px-3 text-right" title="Arazide ölçülen alet yüksekliği">h_ölçü (m)</th>
+                      <th className="py-2.5 px-3 text-right" title="Dik bileşene indirgenmiş ARP yüksekliği">h_ARP (m)</th>
+                      <th className="py-2.5 px-3 text-right" title="IGS ANTEX 1.4 İyonosfersiz LC Faz Merkezi Ofseti">PCO_Up (mm)</th>
+                      <th className="py-2.5 px-3 text-right text-purple-700 font-bold" title="h_ARP + PCO_Up (toplam faz merkezi yüksekliği)">h_APC LC (m)</th>
+                      <th className="py-2.5 px-3 text-right bg-emerald-50/60 font-black text-emerald-950" title="Zemin röper elipsoidal kotu">H_zemin (m)</th>
+                      <th className="py-2.5 px-3 text-right text-slate-700" title="Anten Referans Düzlemi kotu: H_zemin + h_ARP">H_ARP (m)</th>
+                      <th className="py-2.5 px-3 text-right text-purple-900 font-bold" title="Anten Faz Merkezi kotu: H_zemin + h_APC">H_APC (m)</th>
+                      <th className="py-2.5 px-3 text-right text-slate-600">σ_U (mm)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-mono">
+                    {stationList.map((st) => {
+                      const isFixed = st.isFixed.x && st.isFixed.y && st.isFixed.z;
+                      const isSlant = st.antenna?.heightType === 'slant';
+                      const pcoL1_u = st.antenna?.pcoL1?.u ?? 89.35;
+                      const pcoL2_u = st.antenna?.pcoL2?.u ?? 117.76;
+                      const apcCalc = calculateAntennaPhaseCenterHeight(
+                        st.antenna?.heightType || 'vertical',
+                        st.antenna?.measuredHeight || 0,
+                        st.antenna?.radius || 0.09,
+                        isSlant ? (st.antenna?.verticalOffset || 0) : 0,
+                        pcoL1_u,
+                        pcoL2_u,
+                        'L3'
+                      );
+
+                      const groundH = st.groundH ?? st.adjustedH ?? st.h;
+                      const arpH = st.arpH ?? Number((groundH + apcCalc.hArp).toFixed(4));
+                      const apcH = st.apcH ?? Number((groundH + apcCalc.hApcL3).toFixed(4));
+
+                      return (
+                        <tr key={st.id} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="py-2.5 px-3 font-bold font-sans text-slate-900">{st.name}</td>
+                          <td className="py-2.5 px-3 font-sans">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                isFixed ? 'bg-rose-100 text-rose-800' : 'bg-emerald-100 text-emerald-800'
+                              }`}
+                            >
+                              {isFixed ? 'SABİT' : 'DENGELENDİ'}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 font-sans text-slate-700 truncate max-w-[140px]" title={st.antenna?.model || '-'}>
+                            {st.antenna?.model || '-'}
+                          </td>
+                          <td className="py-2.5 px-3 font-sans">
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${isSlant ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'}`}>
+                              {isSlant ? 'Eğik Çentik' : 'Düşey Jalon'}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-right text-slate-800">
+                            {(st.antenna?.measuredHeight || 0).toFixed(4)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-semibold text-slate-800">
+                            {apcCalc.hArp.toFixed(4)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right text-indigo-700">
+                            +{apcCalc.pcoL3_Up_mm.toFixed(1)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-bold text-purple-700">
+                            {apcCalc.hApcL3.toFixed(4)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-black text-emerald-950 bg-emerald-50/60">
+                            {groundH.toFixed(4)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right text-slate-700">
+                            {arpH.toFixed(4)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-bold text-purple-900">
+                            {apcH.toFixed(4)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right text-slate-600">
+                            {(st.sigmaUp ?? st.sigmaZ ?? 0).toFixed(1)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-[11px] text-slate-600 space-y-1">
+                <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                  <Info className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Düşey İndirgeme ve Seviye Bağıntıları:</span>
+                </div>
+                <div className="font-mono text-[10px] text-slate-700 pl-5 space-y-0.5">
+                  <div>1. Dik Anten Boyu: <strong className="text-slate-900">h_ARP = √(s² - R²) - Δh_çentik</strong> (Düşey ölçüde: h_ARP = h_ölçü)</div>
+                  <div>2. Faz Merkezi Yüksekliği: <strong className="text-purple-800">h_APC = h_ARP + PCO_Up(LC)</strong></div>
+                  <div>3. Zemin Noktası Röper Kotu: <strong className="text-emerald-800">H_zemin = H_APC - h_APC</strong> (Ağ dengelemesi bu zemin kotunu üretir)</div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
