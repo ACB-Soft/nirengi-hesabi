@@ -940,7 +940,6 @@ export const StationsAntennaTab: React.FC<Props> = ({
                   <th className="py-2.5 px-3">GNSS Anteni</th>
                   <th className="py-2.5 px-3 text-right">Alet Yük. (m)</th>
                   <th className="py-2.5 px-3 text-center">Yük. Tipi</th>
-                  <th className="py-2.5 px-3 text-center">Epok Hızları (Vx, Vy, Vz)</th>
                   <th className="py-2.5 px-3 text-center">GPS Week Day</th>
                   <th className="py-2.5 px-3 text-left">Başlangıç Zamanı</th>
                   <th className="py-2.5 px-3 text-left">Bitiş Zamanı</th>
@@ -1057,52 +1056,26 @@ export const StationsAntennaTab: React.FC<Props> = ({
                         </span>
                       </td>
 
-                      {/* 9. Epok Hızları */}
-                      <td className="py-2.5 px-3 text-center whitespace-nowrap">
-                        <button
-                          onClick={() => handleOpenVelocityModal(st.id)}
-                          className="font-mono text-[11px] text-purple-700 hover:text-purple-900 bg-purple-50 hover:bg-purple-100 border border-purple-200 px-2 py-0.5 rounded cursor-pointer font-bold"
-                          title="Tektonik plaka hızlarını düzenle"
-                        >
-                          {(st.velocities?.vx * 1000).toFixed(1)}, {(st.velocities?.vy * 1000).toFixed(1)}, {(st.velocities?.vz * 1000).toFixed(1)} mm/yıl
-                        </button>
-                      </td>
-
-                      {/* 10. GPS Week Day */}
+                      {/* 9. GPS Week Day */}
                       <td className="py-2.5 px-3 text-center font-mono font-bold text-slate-800 whitespace-nowrap">
                         <span className="bg-slate-100 text-slate-800 border border-slate-200 px-2 py-0.5 rounded text-[11px]">
                           {gpsWeekDayStr}
                         </span>
                       </td>
 
-                      {/* 11. Başlangıç Zamanı */}
+                      {/* 10. Başlangıç Zamanı */}
                       <td className="py-2.5 px-3 font-mono text-[11px] text-slate-700 whitespace-nowrap">
                         {adjustDateStringToTimeZone(st.occupation?.firstEpochDate || st.observationDateStr, timeZone)}
                       </td>
 
-                      {/* 12. Bitiş Zamanı */}
+                      {/* 11. Bitiş Zamanı */}
                       <td className="py-2.5 px-3 font-mono text-[11px] text-slate-700 whitespace-nowrap">
                         {adjustDateStringToTimeZone(st.occupation?.lastEpochDate, timeZone)}
                       </td>
 
-                      {/* 13. İşlem */}
+                      {/* 12. İşlem */}
                       <td className="py-2.5 px-3 text-center whitespace-nowrap">
                         <div className="flex items-center justify-center gap-1.5">
-                          <button
-                            onClick={() => {
-                              if (onNavigateToQcTab) {
-                                onNavigateToQcTab(st.id);
-                              } else {
-                                setOccupationModalStationId(st.id);
-                              }
-                            }}
-                            className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 rounded text-[11px] font-bold cursor-pointer flex items-center gap-1 transition"
-                            title="Uydu ve Gökyüzü Takip Grafiğini Aç (Skyplot & QC)"
-                          >
-                            <Compass className="w-3.5 h-3.5 text-emerald-600" />
-                            <span>QC / Skyplot</span>
-                          </button>
-
                           <button
                             onClick={() => handleOpenEditModal(st)}
                             className="px-2 py-1 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-300 rounded text-[11px] font-bold cursor-pointer flex items-center gap-1 transition"
