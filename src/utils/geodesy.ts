@@ -2752,9 +2752,12 @@ export function shiftReferenceStationsToSurveyEpoch(
   for (const id in updated) {
     const st = updated[id];
     if (st.isFixed.x || st.type === 'CORS') {
-      const x_t = st.x + st.velocities.vx * dt;
-      const y_t = st.y + st.velocities.vy * dt;
-      const z_t = st.z + st.velocities.vz * dt;
+      const baseRefX = st.refX ?? st.x;
+      const baseRefY = st.refY ?? st.y;
+      const baseRefZ = st.refZ ?? st.z;
+      const x_t = baseRefX + st.velocities.vx * dt;
+      const y_t = baseRefY + st.velocities.vy * dt;
+      const z_t = baseRefZ + st.velocities.vz * dt;
       const geo = ecefToGeodetic(x_t, y_t, z_t);
       const tm = geodeticToTM(geo.lat, geo.lon, 30);
 

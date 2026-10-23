@@ -33,26 +33,41 @@ import {
   X,
   FileText,
   Activity,
+  Zap,
+  Upload,
+  Orbit,
 } from 'lucide-react';
+import { WorkerProgressMessage } from '../workers/gnssBaselineWorker';
+import { BroadcastEphemeris } from '../utils/rinexNavParser';
 
 interface Props {
   baselines: BaselineVector[];
   stations: Record<string, Station>;
+  ephemerisMap?: Record<string, BroadcastEphemeris[]>;
   onUpdateBaseline: (baseline: BaselineVector) => void;
   onAddBaseline: (baseline: BaselineVector) => void;
   onDeleteBaseline: (id: string) => void;
   onRunRtklibSimulation: () => void;
   onGenerateBaselines?: () => void;
+  onSolveAllBaselinesAndAdjust?: () => void;
+  onUploadNavFile?: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  isWorkerProcessing?: boolean;
+  workerProgress?: WorkerProgressMessage | null;
 }
 
 export const BaselinesTab: React.FC<Props> = ({
   baselines,
   stations,
+  ephemerisMap = {},
   onUpdateBaseline,
   onAddBaseline,
   onDeleteBaseline,
   onRunRtklibSimulation,
   onGenerateBaselines,
+  onSolveAllBaselinesAndAdjust,
+  onUploadNavFile,
+  isWorkerProcessing = false,
+  workerProgress,
 }) => {
   const stationList = Object.values(stations);
   const stationCount = stationList.length;
@@ -185,10 +200,26 @@ export const BaselinesTab: React.FC<Props> = ({
           </div>
 
           <div className="flex items-center gap-2.5 flex-wrap">
+            {onUploadNavFile && (
+              <label
+                className="px-3 py-2 text-xs font-semibold bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-xl shadow-2xs transition flex items-center gap-1.5 cursor-pointer"
+                title="RINEX Navigasyon (.nav, .n, .g) efemeris dosyası yükle"
+              >
+                <Orbit className="w-3.5 h-3.5 text-indigo-600" />
+                <span>RINEX Nav (.nav) Yükle</span>
+                <input
+                  type="file"
+                  accept=".nav,.n,.g,.rnx,.NAV,.N,.G,.RNX"
+                  onChange={onUploadNavFile}
+                  className="hidden"
+                />
+              </label>
+            )}
+
             {stationCount >= 2 && (
               <button
                 onClick={handleOpenSolver}
-                className="px-3.5 py-2 text-xs font-bold bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-300 rounded-xl shadow-2xs transition flex items-center gap-1.5"
+                className="px-3.5 py-2 text-xs font-bold bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-300 rounded-xl shadow-2xs transition flex items-center gap-1.5 cursor-pointer"
                 title="İki istasyon seçerek canlı çift fark baz çözümü yapın"
               >
                 <Plus className="w-3.5 h-3.5 text-sky-600" />
@@ -199,33 +230,78 @@ export const BaselinesTab: React.FC<Props> = ({
             {onGenerateBaselines && stationCount >= 2 && (
               <button
                 onClick={onGenerateBaselines}
-                className="px-3.5 py-2 text-xs font-bold bg-sky-600 hover:bg-sky-700 text-white rounded-xl shadow-sm transition flex items-center gap-1.5"
+                className="px-3.5 py-2 text-xs font-bold bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-xl shadow-2xs transition flex items-center gap-1.5 cursor-pointer"
                 title="Yüklenen istasyonlardan optimal ağ topolojisini (Radyal + Kontrol + Döngü bazları) türetir"
               >
-                <Share2 className="w-3.5 h-3.5" />
-                <span>Ağ Bazlarını Türet</span>
+                <Share2 className="w-3.5 h-3.5 text-slate-500" />
+                <span>Ağ Topolojisi</span>
               </button>
             )}
 
-            <button
-              onClick={handleSimulateRtklib}
-              disabled={isProcessing || totalCount === 0}
-              className="px-4 py-2 text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white rounded-xl shadow-sm transition flex items-center gap-2 disabled:opacity-50"
-            >
-              {isProcessing ? (
-                <>
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-sky-400" />
-                  <span>RTKLIB Çözüyor (-p 3 -m 10 -f 3)...</span>
-                </>
-              ) : (
-                <>
-                  <Cpu className="w-3.5 h-3.5 text-sky-400" />
-                  <span>RTKLIB Motorunu Çalıştır</span>
-                </>
-              )}
-            </button>
+            {onSolveAllBaselinesAndAdjust && stationCount >= 2 && (
+              <button
+                onClick={onSolveAllBaselinesAndAdjust}
+                disabled={isWorkerProcessing}
+                className="px-4 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-sm transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                title="Web Worker çift fark ve LAMBDA motoru ile tüm bazları çözer ve 3D Dayalı Dengelemeye aktarır"
+              >
+                {isWorkerProcessing ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-white" />
+                    <span>Çözülüyor ({workerProgress?.percent || 0}%)...</span>
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-3.5 h-3.5 text-amber-300" />
+                    <span>Tek Tıkla Tüm Ağı Çöz &amp; Dengele</span>
+                  </>
+                )}
+              </button>
+            )}
           </div>
         </div>
+
+        {/* Live Web Worker Baseline Processing Banner */}
+        {isWorkerProcessing && (
+          <div className="mt-4 p-4 bg-emerald-50 border border-emerald-200 rounded-xl space-y-2.5">
+            <div className="flex items-center justify-between text-xs font-bold text-emerald-950">
+              <div className="flex items-center gap-2">
+                <RefreshCw className="w-4 h-4 text-emerald-600 animate-spin" />
+                <span>
+                  Yerli GNSS Motoru: {workerProgress ? `${workerProgress.fromName} → ${workerProgress.toName}` : 'Başlatılıyor...'}
+                </span>
+              </div>
+              <span className="font-mono text-emerald-800">
+                %{workerProgress?.percent || 0} ({workerProgress?.currentIdx || 1} / {workerProgress?.totalJobs || totalCount || 1} Baz)
+              </span>
+            </div>
+            <div className="w-full bg-emerald-200 rounded-full h-2 overflow-hidden">
+              <div
+                className="bg-emerald-600 h-full transition-all duration-300"
+                style={{ width: `${Math.max(8, workerProgress?.percent || 10)}%` }}
+              />
+            </div>
+            <div className="flex items-center justify-between text-[11px] text-emerald-800 font-mono flex-wrap gap-1">
+              <span>
+                Çözüm: <strong className="text-emerald-950">{workerProgress?.status || 'HESAPLANIYOR'}</strong> (Ratio: {workerProgress?.ratio?.toFixed(1) || '...'})
+              </span>
+              <span>IS-GPS-200 Yörünge Efemerisi &amp; LAMBDA Tamsayı Belirsizlik Çözümü Aktif</span>
+            </div>
+          </div>
+        )}
+
+        {/* Ephemeris Orbit Status Badge */}
+        {Object.keys(ephemerisMap).length > 0 && !isWorkerProcessing && (
+          <div className="mt-3 p-2.5 bg-indigo-50/70 border border-indigo-200 rounded-xl text-xs flex items-center justify-between text-indigo-950 font-medium">
+            <div className="flex items-center gap-2">
+              <Orbit className="w-4 h-4 text-indigo-600" />
+              <span>Broadcast Navigasyon Efemerisi Yüklü: <strong>{Object.keys(ephemerisMap).length} Uydu</strong></span>
+            </div>
+            <span className="text-[10px] font-mono text-indigo-700 bg-white px-2 py-0.5 rounded border border-indigo-200">
+              IS-GPS-200 Kepler Yörünge Modeli Aktif
+            </span>
+          </div>
+        )}
 
         {/* Metric Badges Strip */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 pt-4 border-t border-slate-100 text-xs">

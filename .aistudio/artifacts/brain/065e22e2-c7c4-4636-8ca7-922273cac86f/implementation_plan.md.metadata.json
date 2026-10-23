@@ -1,0 +1,6 @@
+{
+  "summary":  "Yerli GNSS Taşıyıcı Faz Çift Fark (Double Difference) Baz Çözücü Motoru ve Tek Tıkla Ağ Dengeleme Entegrasyonu İş Planı. Topcon Tools bağımsızlığını sağlayan Web Worker tabanlı efemeris hesabı, döngü atlaması teşhisi, LAMBDA tamsayı faz belirsizliği çözümü ve 3D ağ dengelemesi mimarisi.",
+  "updatedAt":  "2026-10-23T13:04:04.706831608Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

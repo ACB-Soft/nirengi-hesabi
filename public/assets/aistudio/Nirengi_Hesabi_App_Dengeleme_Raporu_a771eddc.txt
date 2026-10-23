@@ -1,0 +1,52 @@
+================================================================================
+       TUREF / ITRF96 GNSS 3D AĞ DENGELEME VE HESAP RAPORU
+  (Büyük Ölçekli Harita ve Harita Bilgileri Üretim Yönetmeliği Standartlarında)
+================================================================================
+
+PROJE BİLGİLERİ:
+Proje Adı           : Yeni GNSS Nirengi Projesi
+Mühendis / Firma    : Harita Mühendisi
+İdare / Kurum       : T.C. Harita Genel Müdürlüğü
+Koordinat Sistemi   : TUREF-TM30 (DOM: 30 Derece)
+Referans Elipsoidi  : GRS80 (a=6378137.0 m, 1/f=298.257222101)
+Ölçü Epoğu (t)      : 2025.29
+Referans Epoğu      : 2005.00
+Dengeleme Modu      : Dayalı (CORS Sabit)
+Hesaplama Tarihi    : 23.10.2026 15:48:02
+
+DENGELEME İSTATİSTİKLERİ:
+Birim Ölçü St. Hatası (sigma_0) : 0.8605
+Serbestlik Derecesi (DOF)       : 27
+Toplam Ölçü Sayısı (3*m)        : 30
+Toplam Bilinmeyen Sayısı (3*u)  : 3
+Kalıntı Kareler Toplamı [vPv]   : 19.990426
+Tasarım Matrisi A Boyutu        : 30 x 3 (86.7% Seyreklik)
+Normal Matris Kondisyon Sayısı  : 1.48
+Ortalama Serbestlik Katkısı (r̄) : 0.900
+Ki-Kare Testi (95% Güven)       : GEÇTİ (Model Uyumlu)
+Baarda w-testi Kaba Hatalar     : Kaba Hata Tespit Edilmedi
+
+--------------------------------------------------------------------------------
+DENGELENMİŞ KOORDİNATLAR VE HATA ELİPSLERİ:
+Nokta       X(m)         Y(m)         Z(m)       TM-Y(m)      TM-X(m)      H(m)    sX(mm)  sY(mm)  sZ(mm)   a(mm)   b(mm) Az(G)
+--------------------------------------------------------------------------------
+3552329    4221150.3289 2386132.7844 4130014.4909   455877.408  4497679.935   241.384    12.4    14.2    18.6    35.1    30.1  185.3
+BAN1       4299017.8603 2283417.6835 4107629.5742   327949.750  4470211.656    98.086     0.0     0.0     0.0     0.0     0.0    0.0
+BILE       4229802.2545 2439852.6626 4090382.2803   498073.436  4445236.617   584.266     0.0     0.0     0.0     0.0     0.0    0.0
+BRS1       4263421.7653 2372827.7236 4094302.1270   423217.069  4451068.113   213.800     0.0     0.0     0.0     0.0     0.0    0.0
+HARC       4293416.2899 2394865.9032 4050966.4891   427311.530  4394091.692   712.470     0.0     0.0     0.0     0.0     0.0    0.0
+
+--------------------------------------------------------------------------------
+BAZ VEKTÖRLERİ VE DÜZELTME KALINTILARI:
+BazID       Başlangıç->Bitiş     Uzunluk(m)    dX(m)       dY(m)       dZ(m)      vx(mm)   vy(mm)   vz(mm)  vMek(mm)  w-Test
+--------------------------------------------------------------------------------
+BASE_01    BAN1->3552329           130823.69  -77867.526  102715.149   22384.909     -5.9    -47.8      7.4      48.8    1.05
+BASE_02    BILE->3552329            67315.64   -8651.899  -53719.888   39632.223    -26.8     10.2    -12.1      31.1    1.33
+BASE_03    BRS1->3552329            56914.62  -42271.465   13305.061   35712.353     28.9     -0.1     11.0      31.0    1.84
+BASE_04    HARC->3552329           107457.99  -72265.935   -8733.128   79048.008    -25.7      9.5     -6.3      28.1    0.72
+BASE_05    BAN1->BILE              171930.78  -69215.627  156435.037  -17247.315     21.6    -57.7     21.4      65.3    0.93
+BASE_06    BAN1->BRS1               97153.82  -35596.056   89410.088  -13327.445    -39.3    -47.7     -2.6      61.9    1.33
+BASE_07    BAN1->HARC              125151.12   -5601.589  111448.275  -56663.101     18.4    -55.5     15.6      60.5    1.22
+BASE_08    BILE->BRS1               75086.51   33619.570  -67024.951    3919.869    -59.6     11.5    -22.5      64.8    2.19
+BASE_09    BILE->HARC               87316.43   63614.035  -44986.760  -39415.783      0.6      0.3     -7.7       7.7    0.20
+BASE_10    BRS1->HARC               57125.55   29994.468   22038.187  -43335.653     56.2     -7.2     15.3      58.7    2.66

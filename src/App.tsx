@@ -21,7 +21,9 @@ import {
   generateBaselinesFromStations,
   runFullTopconWorkflow,
 } from './utils/geodesy';
-import { batchProcessNetworkBaselines } from './utils/rtklibEngine';
+import { batchProcessNetworkBaselines, batchProcessNetworkBaselinesAsync } from './utils/rtklibEngine';
+import { WorkerProgressMessage } from './workers/gnssBaselineWorker';
+import { BroadcastEphemeris, parseRinexNavFile } from './utils/rinexNavParser';
 
 import { JobConfigTab } from './components/JobConfigTab';
 import { StationsAntennaTab } from './components/StationsAntennaTab';
@@ -109,6 +111,11 @@ export default function App() {
   const [unconstrainedResult, setUnconstrainedResult] = useState<AdjustmentResult | null>(null);
   const [constrainedResult, setConstrainedResult] = useState<AdjustmentResult | null>(null);
   const [adjustmentResult, setAdjustmentResult] = useState<AdjustmentResult | null>(null);
+
+  // Native GNSS Worker Engine & Ephemeris
+  const [ephemerisMap, setEphemerisMap] = useState<Record<string, BroadcastEphemeris[]>>({});
+  const [isWorkerProcessing, setIsWorkerProcessing] = useState<boolean>(false);
+  const [workerProgress, setWorkerProgress] = useState<WorkerProgressMessage | null>(null);
 
   const [isLoading, setIsLoading] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -322,6 +329,75 @@ export default function App() {
     );
     setLoopClosures(loops);
     showToast(`RTKLIB Çift Fark çözümü tamamlandı: ${solved.length} baz başarıyla hesaplandı.`);
+  };
+
+  const handleUploadNavFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const parsed = parseRinexNavFile(text);
+      const satCount = Object.keys(parsed).length;
+      if (satCount > 0) {
+        setEphemerisMap(parsed);
+        showToast(`RINEX Navigasyon dosyası yüklendi: ${file.name} (${satCount} uydu efemerisi aktif)`);
+      } else {
+        showToast('Geçerli GPS navigasyon efemerisi bulunamadı.');
+      }
+    } catch (err: any) {
+      showToast(`Nav dosyası okuma hatası: ${err?.message || err}`);
+    }
+    e.target.value = '';
+  };
+
+  const handleSolveAllBaselinesAndAdjust = async () => {
+    if (Object.keys(stations).length < 2) {
+      showToast('Baz çözümü ve dengeleme için en az 2 istasyon gereklidir.');
+      return;
+    }
+    setIsWorkerProcessing(true);
+    showToast('Yerli GNSS Çift Fark ve LAMBDA motoru başlatıldı...');
+
+    try {
+      const solved = await batchProcessNetworkBaselinesAsync(
+        stations,
+        {
+          ephemerisMap,
+          elevationMaskDeg: config.elevationMask,
+        },
+        (progress) => {
+          setWorkerProgress(progress);
+        }
+      );
+      setBaselines(solved);
+      const loops = calculateLoopClosures(
+        stations,
+        solved,
+        config.loopToleranceBaseMm,
+        config.loopTolerancePpm
+      );
+      setLoopClosures(loops);
+
+      // Run constrained network adjustment directly with solved carrier phase baselines
+      const res = perform3DNetworkAdjustment(stations, solved, 'constrained', config);
+      if (res) {
+        setConstrainedResult(res);
+        setAdjustmentResult(res);
+        setStations((prev) => ({
+          ...prev,
+          ...res.stations,
+        }));
+      }
+      showToast(`Tüm ağ başarıyla çözüldü! (${solved.length} baz vektörü FIX, 3D Dayalı Dengeleme tamamlandı)`);
+      setActiveTab('constrained_adjustment');
+    } catch (err: any) {
+      console.error('Batch baseline solve error:', err);
+      showToast(`Baz çözümü sırasında hata: ${err?.message || err}`);
+    } finally {
+      setIsWorkerProcessing(false);
+      setWorkerProgress(null);
+    }
   };
 
   // Project Management Handlers
@@ -672,11 +748,16 @@ export default function App() {
           <BaselinesTab
             baselines={baselines}
             stations={stations}
+            ephemerisMap={ephemerisMap}
             onUpdateBaseline={handleUpdateBaseline}
             onAddBaseline={handleAddBaseline}
             onDeleteBaseline={handleDeleteBaseline}
             onRunRtklibSimulation={handleRunRtklibSimulation}
             onGenerateBaselines={handleGenerateBaselinesFromPoints}
+            onSolveAllBaselinesAndAdjust={handleSolveAllBaselinesAndAdjust}
+            onUploadNavFile={handleUploadNavFile}
+            isWorkerProcessing={isWorkerProcessing}
+            workerProgress={workerProgress}
           />
         )}
 
