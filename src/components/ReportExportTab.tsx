@@ -34,7 +34,11 @@ import {
   Sliders,
   ShieldCheck,
   Check,
+  Archive,
+  Lock,
+  Loader2,
 } from 'lucide-react';
+import { exportSecureProjectZipArchive, triggerBlobDownload } from '../utils/projectArchiveManager';
 
 interface Props {
   config: JobConfig;
@@ -51,6 +55,8 @@ export const ReportExportTab: React.FC<Props> = ({
 }) => {
   const [dxfScale, setDxfScale] = useState<number>(1000);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
+  const [isExportingZip, setIsExportingZip] = useState(false);
+  const [zipProgressText, setZipProgressText] = useState<string>('');
 
   const showNotification = (msg: string) => {
     setExportNotice(msg);
@@ -96,6 +102,48 @@ export const ReportExportTab: React.FC<Props> = ({
   const handleExportGeoJson = () => {
     exportNetworkToGeoJson(config, stations, adjustmentResult?.baselines || [], adjustmentResult);
     showNotification('QGIS / WebGIS GeoJSON dosyası başarıyla indirildi.');
+  };
+
+  const handleExportZipArchive = async () => {
+    setIsExportingZip(true);
+    setZipProgressText('Arşiv paketleme başlatılıyor...');
+
+    try {
+      const currentProject = {
+        id: 'project-' + Date.now(),
+        name: config.projectName || 'GNSS_Nirengi_Projesi',
+        updatedAt: new Date().toLocaleDateString('tr-TR') + ' ' + new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
+        calculatedAt: adjustmentResult?.adjustedAt || new Date().toLocaleString('tr-TR'),
+        stationCount: Object.keys(stations).length,
+        baselineCount: (adjustmentResult?.baselines || []).length,
+        pointCount: Object.keys(stations).length,
+        sigma0: adjustmentResult?.sigma0Aposteriori,
+        isAccepted: adjustmentResult?.chiSquareTest?.passed,
+        data: {
+          config,
+          stations,
+          baselines: adjustmentResult?.baselines || [],
+          loopClosures,
+          adjustmentResult,
+          constrainedResult: adjustmentResult?.mode === 'constrained' ? adjustmentResult : null,
+          unconstrainedResult: adjustmentResult?.mode === 'unconstrained' ? adjustmentResult : null,
+        },
+      };
+
+      const blob = await exportSecureProjectZipArchive(currentProject, (prog) => {
+        setZipProgressText(`%${prog.percent}`);
+      });
+
+      const safeName = (config.projectName || 'GNSS_Projesi').replace(/[^a-zA-Z0-9_\u00C0-\u017F-]/g, '_');
+      triggerBlobDownload(blob, `${safeName}_GNSS_Arsivi.zip`);
+      showNotification('Tam Proje Arşivi (.zip: JSON + Ham RINEX + Rapor) HMAC korumalı olarak başarıyla indirildi.');
+    } catch (err: any) {
+      console.error('ZIP export error:', err);
+      alert(`Arşiv oluşturma hatası: ${err?.message || err}`);
+    } finally {
+      setIsExportingZip(false);
+      setZipProgressText('');
+    }
   };
 
   const handleExportTxt = () => {
@@ -240,7 +288,25 @@ export const ReportExportTab: React.FC<Props> = ({
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={handleExportZipArchive}
+              disabled={isExportingZip}
+              className="px-4 py-2.5 text-xs font-bold bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl shadow-xs transition cursor-pointer flex items-center gap-2"
+              title="Proje JSON, Ham RINEX (.obs/.nav) ve BÖHYY Raporunu tek bir HMAC-SHA256 korumalı .zip dosyasında arşivler"
+            >
+              {isExportingZip ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-emerald-200" />
+                  <span>{zipProgressText || 'Paketleniyor...'}</span>
+                </>
+              ) : (
+                <>
+                  <Archive className="w-4 h-4 text-emerald-300" />
+                  <span>Tam Proje Arşivi (.zip)</span>
+                </>
+              )}
+            </button>
             <button
               onClick={handlePrint}
               className="px-4 py-2.5 text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white rounded-xl shadow-sm transition cursor-pointer flex items-center gap-2"

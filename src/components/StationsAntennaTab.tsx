@@ -51,6 +51,16 @@ import { OccupationViewTab } from './OccupationViewTab';
 import { parseRinexFile, createStationFromSummary } from '../utils/rinexStreamParser';
 import { saveRinexFileToOpfs } from '../utils/opfsStorage';
 import {
+  parseAntexContent,
+  saveMultipleCustomAntennas,
+  saveCustomAntenna,
+  getCustomAntennaCatalog,
+  getAllKnownAntennas,
+  findAntennaInCatalog,
+  isStationAntennaCalibrated,
+  getUncalibratedStations,
+} from '../utils/antennaCatalogManager';
+import {
   Radio,
   Upload,
   Trash2,
@@ -78,6 +88,7 @@ import {
   Settings,
   ChevronDown,
   ChevronUp,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface Props {
@@ -181,10 +192,25 @@ export const StationsAntennaTab: React.FC<Props> = ({
     return getIgsProductDetails(earliestObsDateStr, earliestEpochDecimal);
   }, [earliestObsDateStr, earliestEpochDecimal]);
 
-  const manufacturers = useMemo(() => Array.from(new Set(NOAA_ANTCAL_CATALOG.map((a) => a.manufacturer))).sort(), []);
+  const [catalogVersion, setCatalogVersion] = useState(0);
+
+  // Uncalibrated stations list (stations with isCalibrated === false or missing calibration)
+  const uncalibratedStations = useMemo(() => {
+    return getUncalibratedStations(sortedStations);
+  }, [sortedStations, catalogVersion]);
+
+  // All known antennas (Built-in NOAA ANTCAL + User-Uploaded Custom ATX)
+  const allKnownAntennas = useMemo(() => {
+    return getAllKnownAntennas();
+  }, [catalogVersion]);
+
+  const manufacturers = useMemo(
+    () => Array.from(new Set(allKnownAntennas.map((a) => a.manufacturer))).sort(),
+    [allKnownAntennas]
+  );
 
   const modalFilteredAntennas = useMemo(() => {
-    return NOAA_ANTCAL_CATALOG.filter((ant) => {
+    return allKnownAntennas.filter((ant) => {
       const matchesMan = modalManufacturer === 'ALL' || ant.manufacturer === modalManufacturer;
       const matchesCat = modalCategory === 'ALL' || ant.category === modalCategory;
       const matchesQuery =
@@ -194,7 +220,7 @@ export const StationsAntennaTab: React.FC<Props> = ({
         ant.manufacturer.toLowerCase().includes(modalSearchQuery.toLowerCase());
       return matchesMan && matchesCat && matchesQuery;
     });
-  }, [modalManufacturer, modalCategory, modalSearchQuery]);
+  }, [allKnownAntennas, modalManufacturer, modalCategory, modalSearchQuery]);
 
   const handleToggleFixed = (id: string) => {
     const st = stations[id];
@@ -350,45 +376,175 @@ export const StationsAntennaTab: React.FC<Props> = ({
   };
 
   /**
-   * Upload single .atx file for a specific station
+   * Process and save uploaded ATX files to permanent custom catalog and update affected stations
    */
-  const handleSingleAtxUpload = (stationId: string, e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const processAtxFiles = async (files: FileList | File[], targetStationId?: string) => {
+    if (!files || files.length === 0) return;
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const text = event.target?.result as string;
-      if (!text) return;
+    const allParsed: NoaaAntennaCalibration[] = [];
 
-      const parsedAtx = parseAntexFile(text);
-      const models = Object.keys(parsedAtx);
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      try {
+        let text = '';
+        if (file.name.toLowerCase().endsWith('.gz') || file.type.includes('gzip')) {
+          const ds = new DecompressionStream('gzip');
+          const stream = file.stream().pipeThrough(ds);
+          text = await new Response(stream).text();
+        } else {
+          text = await file.text();
+        }
 
-      if (models.length > 0) {
-        const modelName = models[0];
-        const atxData = parsedAtx[modelName];
-        const currentStn = stations[stationId];
+        if (text) {
+          const parsed = parseAntexContent(text);
+          allParsed.push(...parsed);
+        }
+      } catch (err: any) {
+        console.error('ATX dosya okuma hatası:', file.name, err);
+      }
+    }
 
-        if (currentStn) {
-          const updatedStn: Station = {
-            ...currentStn,
+    if (allParsed.length === 0) {
+      setUploadFeedback('Geçerli bir ANTEX (.atx) anten kalibrasyon parametresi tespit edilemedi.');
+      return;
+    }
+
+    // CRITICAL: Save all newly uploaded antennas to persistent catalog (localStorage)
+    const stats = saveMultipleCustomAntennas(allParsed);
+    setCatalogVersion((v) => v + 1);
+
+    // Now update stations with new calibrations
+    const updatedStationNames: string[] = [];
+
+    // If targetStationId specified, calibrate that specific station
+    if (targetStationId && stations[targetStationId]) {
+      const st = stations[targetStationId];
+      let calMatch: NoaaAntennaCalibration | undefined = allParsed.find(
+        (a) => a.model.trim().toUpperCase() === (st.antenna?.model || st.antenna?.rawRinexModel || '').trim().toUpperCase()
+      );
+      if (!calMatch && allParsed.length === 1) {
+        calMatch = allParsed[0];
+      }
+      if (!calMatch) {
+        const found = findAntennaInCatalog(st.antenna?.model || st.antenna?.rawRinexModel || '');
+        if (found) calMatch = found.calibration;
+      }
+
+      if (calMatch) {
+        const isSlant = st.antenna?.heightType === 'slant';
+        const effectiveOffset = isSlant ? (calMatch.verticalOffset || 0) : 0;
+        const corrected = calculateCorrectedAntennaHeight(
+          st.antenna?.heightType || 'vertical',
+          st.antenna?.measuredHeight || 0,
+          calMatch.radius,
+          effectiveOffset
+        );
+        const apcCalc = calculateAntennaPhaseCenterHeight(
+          st.antenna?.heightType || 'vertical',
+          st.antenna?.measuredHeight || 0,
+          calMatch.radius,
+          effectiveOffset,
+          calMatch.pcoL1?.u ?? 89.35,
+          calMatch.pcoL2?.u ?? 117.76,
+          'L3'
+        );
+        const baseGroundH = st.groundH ?? st.h;
+
+        const updated: Station = {
+          ...st,
+          groundH: baseGroundH,
+          arpH: Number((baseGroundH + apcCalc.hArp).toFixed(4)),
+          apcH: Number((baseGroundH + apcCalc.hApcL3).toFixed(4)),
+          antenna: {
+            ...st.antenna,
+            model: calMatch.model,
+            radius: calMatch.radius,
+            verticalOffset: effectiveOffset,
+            correctedHeight: corrected,
+            pcoL1: calMatch.pcoL1,
+            pcoL2: calMatch.pcoL2,
+            pcvZenith: calMatch.pcvZenith,
+            isCalibrated: true,
+            calibrationSource: 'CUSTOM_ATX',
+          },
+        };
+        onUpdateStation(updated);
+        updatedStationNames.push(updated.name);
+      }
+    }
+
+    // Check all other stations that are uncalibrated or match newly added models
+    for (const st of Object.values(stations)) {
+      if (targetStationId && st.id === targetStationId) continue;
+      const isCurrentlyCal = isStationAntennaCalibrated(st);
+      if (!isCurrentlyCal) {
+        const matchRes = findAntennaInCatalog(st.antenna?.model || st.antenna?.rawRinexModel || st.name);
+        if (matchRes) {
+          const cal = matchRes.calibration;
+          const isSlant = st.antenna?.heightType === 'slant';
+          const effectiveOffset = isSlant ? (cal.verticalOffset || 0) : 0;
+          const corrected = calculateCorrectedAntennaHeight(
+            st.antenna?.heightType || 'vertical',
+            st.antenna?.measuredHeight || 0,
+            cal.radius,
+            effectiveOffset
+          );
+          const apcCalc = calculateAntennaPhaseCenterHeight(
+            st.antenna?.heightType || 'vertical',
+            st.antenna?.measuredHeight || 0,
+            cal.radius,
+            effectiveOffset,
+            cal.pcoL1?.u ?? 89.35,
+            cal.pcoL2?.u ?? 117.76,
+            'L3'
+          );
+          const baseGroundH = st.groundH ?? st.h;
+
+          const updated: Station = {
+            ...st,
+            groundH: baseGroundH,
+            arpH: Number((baseGroundH + apcCalc.hArp).toFixed(4)),
+            apcH: Number((baseGroundH + apcCalc.hApcL3).toFixed(4)),
             antenna: {
-              ...currentStn.antenna,
-              model: modelName,
-              pcoL1: atxData.pcoL1,
-              pcoL2: atxData.pcoL2,
-              pcvZenith: atxData.pcvZenith,
+              ...st.antenna,
+              model: cal.model,
+              radius: cal.radius,
+              verticalOffset: effectiveOffset,
+              correctedHeight: corrected,
+              pcoL1: cal.pcoL1,
+              pcoL2: cal.pcoL2,
+              pcvZenith: cal.pcvZenith,
+              isCalibrated: true,
+              calibrationSource: matchRes.source,
             },
           };
-          onUpdateStation(updatedStn);
-          setUploadFeedback(`"${currentStn.name}" noktasına .atx anten kalibrasyonu yüklendi: ${modelName}`);
+          onUpdateStation(updated);
+          updatedStationNames.push(updated.name);
         }
-      } else {
-        setUploadFeedback(`Yüklenen .atx dosyasında geçerli anten modeli bulunamadı.`);
       }
-    };
-    reader.readAsText(file);
-    e.target.value = '';
+    }
+
+    setUploadFeedback(
+      `${allParsed.length} adet ANTEX anten kalibrasyon modeli ayrıştırıldı ve kataloga kalıcı olarak kaydedildi (${stats.total} toplam anten). ${
+        updatedStationNames.length > 0
+          ? `[${updatedStationNames.join(', ')}] noktaları başarıyla kalibre edildi.`
+          : 'Mevcut ağda eşleşen noktalar güncellendi.'
+      }`
+    );
+  };
+
+  const handleBatchAtxUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      processAtxFiles(e.target.files);
+      e.target.value = '';
+    }
+  };
+
+  const handleSingleAtxUpload = (stationId: string, e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      processAtxFiles(e.target.files, stationId);
+      e.target.value = '';
+    }
   };
 
   /**
@@ -590,11 +746,15 @@ export const StationsAntennaTab: React.FC<Props> = ({
         pcoL1: ant.pcoL1,
         pcoL2: ant.pcoL2,
         pcvZenith: ant.pcvZenith,
+        isCalibrated: true,
+        calibrationSource: getCustomAntennaCatalog().some((c) => c.model.trim().toUpperCase() === ant.model.trim().toUpperCase())
+          ? 'CUSTOM_ATX'
+          : 'BUILTIN',
       },
     };
 
     onUpdateStation(updated);
-    setUploadFeedback(`"${targetSt.name}" noktasına NOAA ANTCAL anteni atandı: ${ant.displayName}`);
+    setUploadFeedback(`"${targetSt.name}" noktasına anten kalibrasyonu atandı: ${ant.displayName}`);
   };
 
   /**
@@ -698,6 +858,17 @@ export const StationsAntennaTab: React.FC<Props> = ({
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => {
+                setAntennaModalStationId('');
+                setIsAntennaModalOpen(true);
+              }}
+              className="px-3 py-2 text-xs font-semibold bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-lg shadow-2xs transition cursor-pointer flex items-center gap-1.5"
+              title="NOAA ANTCAL ve özel yüklenen anten kalibrasyon kataloğunu görüntüle"
+            >
+              <FileCode className="w-3.5 h-3.5 text-sky-600" />
+              <span>ATX Anten Kataloğu ({allKnownAntennas.length})</span>
+            </button>
 
             {sortedStations.length > 0 && (
               <>
@@ -740,6 +911,71 @@ export const StationsAntennaTab: React.FC<Props> = ({
           </div>
         )}
       </div>
+
+      {/* Fail-Safe ANTEX Protection Warning Banner */}
+      {uncalibratedStations.length > 0 && (
+        <div className="bg-rose-50 border-2 border-rose-400 rounded-2xl p-5 shadow-sm text-rose-950 space-y-3.5 animate-in fade-in">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-start gap-3.5">
+              <div className="w-11 h-11 rounded-xl bg-rose-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+                <AlertTriangle className="w-6 h-6 text-white animate-pulse" />
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-base font-extrabold text-rose-950">
+                    DİKKAT: {uncalibratedStations.length} İstasyonun ANTEX Anten Kalibrasyonu Eksik!
+                  </h3>
+                  <span className="text-xs bg-rose-200 text-rose-900 border border-rose-300 px-2.5 py-0.5 rounded-full font-bold">
+                    Baz Çözümü &amp; Dengeleme Bloke Edildi
+                  </span>
+                </div>
+                <p className="text-xs text-rose-800 leading-relaxed max-w-3xl">
+                  Aşağıdaki istasyonların RINEX başlığında kayıtlı anten modelleri için faz merkezi ofsetleri (PCO/PCV) mutlak kalibrasyon veritabanında bulunamamıştır.
+                  Anten kalibrasyonu olmadan yapılacak baz çözümü ve ağ dengelemesi <strong>5–15 cm düşey kota hatasına</strong> yol açacağından BÖHYY &amp; IGS standartları gereğince işlem engellenmiştir.
+                </p>
+              </div>
+            </div>
+
+            <div className="shrink-0 flex items-center gap-2">
+              <label className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center gap-2 cursor-pointer active:scale-95">
+                <Upload className="w-4 h-4 text-white" />
+                <span>Anten ATX Dosyası Yükle (.atx / .txt)</span>
+                <input
+                  type="file"
+                  accept=".atx,.txt,.atx.gz,.ATX,.TXT"
+                  multiple
+                  onChange={handleBatchAtxUpload}
+                  className="hidden"
+                />
+              </label>
+            </div>
+          </div>
+
+          {/* List of uncalibrated stations */}
+          <div className="pt-2 border-t border-rose-200/80 flex items-center gap-2 flex-wrap text-xs">
+            <span className="font-bold text-rose-900">Eksik Kalibrasyonlu Noktalar:</span>
+            {uncalibratedStations.map((st) => (
+              <div
+                key={st.id}
+                className="bg-white border border-rose-300 px-3 py-1.5 rounded-lg text-xs font-mono font-bold text-rose-950 flex items-center gap-2 shadow-2xs"
+              >
+                <span className="text-rose-600">●</span>
+                <span>{st.name}</span>
+                <span className="text-[11px] text-slate-500 font-sans font-normal">
+                  [{st.antenna?.model || st.antenna?.rawRinexModel || 'Model Belirtilmemiş'}]
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleOpenAntennaModalForStation(st.id)}
+                  className="text-[11px] text-sky-700 hover:text-sky-950 font-sans font-bold underline cursor-pointer ml-1"
+                >
+                  Katalogdan Ata
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 3 Main Action Cards Grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -949,11 +1185,9 @@ export const StationsAntennaTab: React.FC<Props> = ({
               <tbody className="divide-y divide-slate-100">
                 {sortedStations.map((st) => {
                   const isFixed = st.isFixed.x && st.isFixed.y && st.isFixed.z;
-                  const matchedCal = matchAntennaInNoaaCatalog(st.antenna?.model || '');
-
-                  const hasValidAntenna = Boolean(
-                    matchedCal || (st.antenna?.model && st.antenna.model !== 'UNKNOWN' && st.antenna.model !== 'NONE' && st.antenna.model !== '')
-                  );
+                  const isCalibrated = isStationAntennaCalibrated(st);
+                  const matchResult = findAntennaInCatalog(st.antenna?.model || st.antenna?.rawRinexModel || '');
+                  const matchedCal = matchResult?.calibration || matchAntennaInNoaaCatalog(st.antenna?.model || '');
 
                   const gpsWeekDayStr = getGpsWeekDay(
                     st.occupation?.firstEpochDate || st.observationDateStr,
@@ -961,7 +1195,14 @@ export const StationsAntennaTab: React.FC<Props> = ({
                   );
 
                   return (
-                    <tr key={st.id} className="hover:bg-slate-50/80 transition">
+                    <tr
+                      key={st.id}
+                      className={`transition ${
+                        !isCalibrated
+                          ? 'bg-rose-50/60 hover:bg-rose-100/60 border-l-4 border-l-rose-500'
+                          : 'hover:bg-slate-50/80'
+                      }`}
+                    >
                       {/* 1. Nokta Adı */}
                       <td className="py-2.5 px-3 font-bold font-mono text-slate-900 flex items-center gap-2 whitespace-nowrap">
                         <span
@@ -1007,37 +1248,78 @@ export const StationsAntennaTab: React.FC<Props> = ({
 
                       {/* 6. GNSS Anteni */}
                       <td className="py-2.5 px-3 whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          {hasValidAntenna ? (
-                            <button
-                              onClick={() => handleOpenAntennaModalForStation(st.id)}
-                              className="font-mono text-xs font-bold text-sky-700 hover:text-sky-900 underline decoration-sky-300 cursor-pointer"
-                              title="Anten modelini değiştir / NOAA Kataloğu"
-                            >
-                              {getShortAntennaName(matchedCal?.displayName || st.antenna?.model)}
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => handleOpenAntennaModalForStation(st.id)}
-                              className="px-2 py-0.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 rounded text-[10px] font-bold cursor-pointer inline-flex items-center gap-1"
-                            >
-                              <span>Anten Seç</span>
-                            </button>
-                          )}
-
-                          <label
-                            className="p-1 hover:bg-slate-100 text-slate-400 hover:text-sky-600 rounded cursor-pointer transition"
-                            title="Bu noktaya özel .atx anten kalibrasyon dosyası yükle"
-                          >
-                            <FileCode className="w-3.5 h-3.5" />
-                            <input
-                              type="file"
-                              accept=".atx,.ATX"
-                              onChange={(e) => handleSingleAtxUpload(st.id, e)}
-                              className="hidden"
-                            />
-                          </label>
-                        </div>
+                        {!isCalibrated ? (
+                          <div className="flex flex-col gap-1 py-1">
+                            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-rose-100 border border-rose-300 rounded-md text-rose-950 font-bold text-xs shadow-2xs">
+                              <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0 animate-pulse" />
+                              <span className="truncate max-w-[170px]" title={st.antenna?.model || st.antenna?.rawRinexModel}>
+                                {st.antenna?.model || st.antenna?.rawRinexModel || 'Tanımsız Anten'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1.5 text-[10px]">
+                              <span className="font-extrabold text-rose-800 bg-rose-200/90 px-1.5 py-0.5 rounded">
+                                ATX EKSİK
+                              </span>
+                              <label
+                                className="px-2 py-0.5 bg-rose-600 hover:bg-rose-700 text-white rounded font-bold cursor-pointer transition shadow-2xs inline-flex items-center gap-1"
+                                title="Bu nokta için .atx kalibrasyon dosyası yükle"
+                              >
+                                <Upload className="w-2.5 h-2.5" />
+                                <span>ATX Yükle</span>
+                                <input
+                                  type="file"
+                                  accept=".atx,.txt,.atx.gz,.ATX,.TXT"
+                                  onChange={(e) => handleSingleAtxUpload(st.id, e)}
+                                  className="hidden"
+                                />
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenAntennaModalForStation(st.id)}
+                                className="text-sky-700 hover:text-sky-950 underline font-semibold cursor-pointer"
+                              >
+                                Katalog
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col gap-0.5">
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                onClick={() => handleOpenAntennaModalForStation(st.id)}
+                                className="font-mono text-xs font-bold text-sky-700 hover:text-sky-900 underline decoration-sky-300 cursor-pointer"
+                                title="Anten modelini değiştir / NOAA Kataloğu"
+                              >
+                                {getShortAntennaName(matchedCal?.displayName || st.antenna?.model)}
+                              </button>
+                              <span
+                                className={`px-1.5 py-0.5 rounded text-[9px] font-bold border inline-flex items-center gap-0.5 ${
+                                  st.antenna?.calibrationSource === 'CUSTOM_ATX'
+                                    ? 'bg-purple-100 text-purple-800 border-purple-300'
+                                    : 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                                }`}
+                              >
+                                <Check className="w-2.5 h-2.5" />
+                                <span>{st.antenna?.calibrationSource === 'CUSTOM_ATX' ? 'Özel ATX' : 'IGS/NOAA'}</span>
+                              </span>
+                              <label
+                                className="p-1 hover:bg-slate-100 text-slate-400 hover:text-sky-600 rounded cursor-pointer transition"
+                                title="Farklı bir .atx anten kalibrasyon dosyası yükle"
+                              >
+                                <FileCode className="w-3.5 h-3.5" />
+                                <input
+                                  type="file"
+                                  accept=".atx,.txt,.atx.gz,.ATX,.TXT"
+                                  onChange={(e) => handleSingleAtxUpload(st.id, e)}
+                                  className="hidden"
+                                />
+                              </label>
+                            </div>
+                            <span className="text-[10px] text-slate-500 font-mono">
+                              PCO Up: +{(st.antenna?.pcoL1?.u ?? 0).toFixed(1)} / +{(st.antenna?.pcoL2?.u ?? 0).toFixed(1)} mm
+                            </span>
+                          </div>
+                        )}
                       </td>
 
                       {/* 7. Alet Yüksekliği */}
@@ -1247,6 +1529,70 @@ export const StationsAntennaTab: React.FC<Props> = ({
                   )}
                 </div>
               </div>
+
+              {/* Antenna Calibration Status in Edit Modal */}
+              {(() => {
+                const isCalibrated = isStationAntennaCalibrated(editStation);
+                const matchResult = findAntennaInCatalog(editStation.antenna?.model || editStation.antenna?.rawRinexModel || '');
+
+                return (
+                  <div className={`p-3.5 rounded-xl border space-y-2 ${
+                    isCalibrated
+                      ? 'bg-emerald-50/70 border-emerald-300 text-emerald-950'
+                      : 'bg-rose-50 border-2 border-rose-400 text-rose-950'
+                  }`}>
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div className="flex items-center gap-1.5 font-bold">
+                        {isCalibrated ? (
+                          <>
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                            <span>ANTEX Kalibrasyonlu Anten</span>
+                          </>
+                        ) : (
+                          <>
+                            <AlertTriangle className="w-4 h-4 text-rose-600 animate-pulse" />
+                            <span>ANTEX Kalibrasyonu Eksik (Baz Çözümü Engellendi)</span>
+                          </>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <label className="px-2.5 py-1 bg-white hover:bg-slate-50 border border-slate-300 rounded text-[11px] font-bold text-slate-700 cursor-pointer shadow-2xs flex items-center gap-1">
+                          <Upload className="w-3 h-3 text-sky-600" />
+                          <span>ATX Yükle</span>
+                          <input
+                            type="file"
+                            accept=".atx,.txt,.atx.gz,.ATX,.TXT"
+                            onChange={(e) => {
+                              handleSingleAtxUpload(editStation.id, e);
+                              setEditStation(null);
+                            }}
+                            className="hidden"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const id = editStation.id;
+                            setEditStation(null);
+                            handleOpenAntennaModalForStation(id);
+                          }}
+                          className="px-2.5 py-1 bg-sky-600 hover:bg-sky-700 text-white rounded text-[11px] font-bold cursor-pointer shadow-2xs"
+                        >
+                          Katalogdan Seç
+                        </button>
+                      </div>
+                    </div>
+                    <div className="text-[11px] font-mono text-slate-600 flex items-center justify-between flex-wrap gap-2">
+                      <span>Model: <strong className="text-slate-900">{editStation.antenna?.model || 'Tanımsız'}</strong></span>
+                      {isCalibrated && (
+                        <span>
+                          PCO Up: <strong>L1: +{(editStation.antenna?.pcoL1?.u ?? 0).toFixed(1)} / L2: +{(editStation.antenna?.pcoL2?.u ?? 0).toFixed(1)} mm</strong>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Calculated ARP & APC Height Preview strictly conforming to IGS ANTEX 1.4 Section 3 */}
               {(() => {
@@ -1738,20 +2084,36 @@ export const StationsAntennaTab: React.FC<Props> = ({
                 <div className="flex items-center gap-2">
                   <Sliders className="w-4 h-4 text-sky-400" />
                   <h3 className="font-bold text-base">
-                    NOAA NGS ANTCAL Anten Kalibrasyon Kataloğu
+                    NOAA NGS ANTCAL &amp; IGS20 Anten Kalibrasyon Kataloğu
                   </h3>
                 </div>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Seçilen Nokta: <strong>{stations[antennaModalStationId]?.name || antennaModalStationId}</strong> &bull; 
-                  Resmi NOAA & IGS20 PCO / PCV Parametreleri
+                  {antennaModalStationId ? (
+                    <>Seçilen Nokta: <strong>{stations[antennaModalStationId]?.name || antennaModalStationId}</strong> &bull; Resmi NOAA / IGS &amp; Özel ATX Parametreleri</>
+                  ) : (
+                    <>Kalıcı Anten Veritabanı &bull; {allKnownAntennas.length} Anten Modeli Kayıtlı</>
+                  )}
                 </p>
               </div>
-              <button
-                onClick={() => setIsAntennaModalOpen(false)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                <label className="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs rounded-lg shadow-2xs transition flex items-center gap-1.5 cursor-pointer">
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Yeni ATX Yükle</span>
+                  <input
+                    type="file"
+                    accept=".atx,.txt,.atx.gz,.ATX,.TXT"
+                    multiple
+                    onChange={handleBatchAtxUpload}
+                    className="hidden"
+                  />
+                </label>
+                <button
+                  onClick={() => setIsAntennaModalOpen(false)}
+                  className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             {/* Filter Controls */}
@@ -1761,7 +2123,7 @@ export const StationsAntennaTab: React.FC<Props> = ({
                   <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3" />
                   <input
                     type="text"
-                    placeholder="Model ara (örn: Zephyr, TRM)..."
+                    placeholder="Model veya marka ara (örn: Zephyr, TRM, CHC, LEI)..."
                     value={modalSearchQuery}
                     onChange={(e) => setModalSearchQuery(e.target.value)}
                     className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-lg text-xs bg-white"
@@ -1774,10 +2136,10 @@ export const StationsAntennaTab: React.FC<Props> = ({
                     onChange={(e) => setModalManufacturer(e.target.value)}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white font-medium"
                   >
-                    <option value="ALL">Tüm Markalar ({NOAA_ANTCAL_CATALOG.length})</option>
+                    <option value="ALL">Tüm Markalar ({allKnownAntennas.length})</option>
                     {manufacturers.map((m) => (
                       <option key={m} value={m}>
-                        {m} ({NOAA_ANTCAL_CATALOG.filter((a) => a.manufacturer === m).length})
+                        {m} ({allKnownAntennas.filter((a) => a.manufacturer === m).length})
                       </option>
                     ))}
                   </select>
@@ -1802,15 +2164,19 @@ export const StationsAntennaTab: React.FC<Props> = ({
             <div className="p-4 overflow-y-auto flex-1 custom-scrollbar divide-y divide-slate-100">
               {modalFilteredAntennas.length === 0 ? (
                 <div className="py-12 text-center text-slate-400 text-xs">
-                  Arama kriterlerine uygun anten kalibrasyon modeli bulunamadı.
+                  Arama kriterlerine uygun anten kalibrasyon modeli bulunamadı. Yukarıdaki "Yeni ATX Yükle" butonundan anten ATX dosyanızı içeri aktarabilirsiniz.
                 </div>
               ) : (
                 modalFilteredAntennas.map((ant) => {
-                  const targetStation = stations[antennaModalStationId];
+                  const targetStation = antennaModalStationId ? stations[antennaModalStationId] : null;
                   const isCurrent =
                     targetStation &&
                     targetStation.antenna?.model &&
                     targetStation.antenna.model.trim().toUpperCase() === ant.model.trim().toUpperCase();
+
+                  const isCustom = getCustomAntennaCatalog().some(
+                    (c) => c.model.trim().toUpperCase() === ant.model.trim().toUpperCase()
+                  );
 
                   return (
                     <div
@@ -1820,34 +2186,46 @@ export const StationsAntennaTab: React.FC<Props> = ({
                       }`}
                     >
                       <div className="space-y-1">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-bold text-slate-900 text-xs">{ant.displayName}</span>
                           <span className="bg-slate-100 text-slate-700 text-[10px] font-mono px-2 py-0.5 rounded border border-slate-200">
                             {ant.manufacturer}
                           </span>
+                          {isCustom && (
+                            <span className="bg-purple-100 text-purple-800 text-[10px] font-bold px-2 py-0.5 rounded border border-purple-200">
+                              Özel ATX
+                            </span>
+                          )}
                         </div>
                         <div className="font-mono text-[11px] text-slate-500 flex items-center gap-3 flex-wrap">
                           <span>Model: <strong className="text-slate-800">{ant.model}</strong></span>
                           <span>Radome: <strong>{ant.radome}</strong></span>
+                          <span>PCO Up: <strong>L1: +{ant.pcoL1?.u?.toFixed(1) || 0} mm / L2: +{ant.pcoL2?.u?.toFixed(1) || 0} mm</strong></span>
                         </div>
                       </div>
 
                       <div className="shrink-0 flex items-center gap-2">
-                        {isCurrent ? (
-                          <span className="px-3 py-1.5 bg-emerald-100 text-emerald-800 font-bold text-xs rounded-lg flex items-center gap-1 border border-emerald-300">
-                            <Check className="w-3.5 h-3.5" />
-                            <span>Mevcut Model</span>
-                          </span>
+                        {antennaModalStationId ? (
+                          isCurrent ? (
+                            <span className="px-3 py-1.5 bg-emerald-100 text-emerald-800 font-bold text-xs rounded-lg flex items-center gap-1 border border-emerald-300">
+                              <Check className="w-3.5 h-3.5" />
+                              <span>Mevcut Model</span>
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => {
+                                handleSelectNoaaAntenna(antennaModalStationId, ant);
+                                setIsAntennaModalOpen(false);
+                              }}
+                              className="px-3.5 py-1.5 bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs rounded-lg shadow-xs cursor-pointer transition"
+                            >
+                              Bu Anteni Noktaya Ata
+                            </button>
+                          )
                         ) : (
-                          <button
-                            onClick={() => {
-                              handleSelectNoaaAntenna(antennaModalStationId, ant);
-                              setIsAntennaModalOpen(false);
-                            }}
-                            className="px-3.5 py-1.5 bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs rounded-lg shadow-xs cursor-pointer transition"
-                          >
-                            Bu Anteni Noktaya Ata
-                          </button>
+                          <span className="text-[11px] text-slate-400 font-medium">
+                            Katalogda Kayıtlı
+                          </span>
                         )}
                       </div>
                     </div>
@@ -1858,7 +2236,9 @@ export const StationsAntennaTab: React.FC<Props> = ({
 
             {/* Modal Footer */}
             <div className="p-3 bg-slate-50 border-t border-slate-200 flex justify-between items-center text-xs text-slate-500">
-              <span>Toplam {modalFilteredAntennas.length} / {NOAA_ANTCAL_CATALOG.length} anten modeli listeleniyor.</span>
+              <span>
+                Toplam {modalFilteredAntennas.length} / {allKnownAntennas.length} anten listeleniyor ({getCustomAntennaCatalog().length} özel ATX).
+              </span>
               <button
                 onClick={() => setIsAntennaModalOpen(false)}
                 className="px-4 py-1.5 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 font-semibold cursor-pointer"

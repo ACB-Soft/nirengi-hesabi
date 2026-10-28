@@ -24,6 +24,7 @@ import {
   calculateCorrectedAntennaHeight,
 } from './geodesy';
 import { matchAntennaInNoaaCatalog } from '../data/noaaAntcal';
+import { findAntennaInCatalog } from './antennaCatalogManager';
 
 const CHUNK_SIZE = 64 * 1024; // 64 KB chunk size for header scanning
 const MAX_HEADER_SCAN = 512 * 1024; // Maximum 512 KB to look for END OF HEADER
@@ -560,14 +561,17 @@ export function createStationFromSummary(
   const pointType: StationType = options.forcedType || summary.detectedPointType;
   const isFixed = pointType === 'CORS';
 
-  // Match antenna in NOAA NGS Antcal catalog
-  const matched = matchAntennaInNoaaCatalog(metadata.antennaType || '');
-  const model = matched ? matched.model : (metadata.antennaType || 'TRM59800.00     NONE');
-  const pcoL1 = matched ? matched.pcoL1 : { n: 0, e: 0, u: 65.0 };
-  const pcoL2 = matched ? matched.pcoL2 : { n: 0, e: 0, u: 60.0 };
-  const pcvZenith = matched ? matched.pcvZenith : [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+  // Match antenna in NOAA NGS Antcal or user-uploaded ATX catalog
+  const matchResult = findAntennaInCatalog(metadata.antennaType || '');
+  const isCalibrated = !!matchResult;
+  const matched = matchResult ? matchResult.calibration : null;
+  const model = matched ? matched.model : (metadata.antennaType || 'BİLİNMEYEN ANTEN');
+  const pcoL1 = matched ? matched.pcoL1 : { n: 0, e: 0, u: 0 };
+  const pcoL2 = matched ? matched.pcoL2 : { n: 0, e: 0, u: 0 };
+  const pcvZenith = matched ? matched.pcvZenith : [0, 0, 0, 0, 0, 0, 0];
   const verticalOffset = matched ? (matched.verticalOffset || 0.0) : 0.0;
-  const correctedHeight = calculateCorrectedAntennaHeight('vertical', metadata.deltaH, matched?.radius || 0.08, 0.0);
+  const radius = matched ? (matched.radius || 0.08) : 0.08;
+  const correctedHeight = calculateCorrectedAntennaHeight('vertical', metadata.deltaH, radius, 0.0);
 
   const observationEpoch = metadata.surveyEpoch || options.surveyEpoch || 2026.0;
 
@@ -596,12 +600,15 @@ export function createStationFromSummary(
       model,
       heightType: 'vertical',
       measuredHeight: metadata.deltaH,
-      radius: 0.08,
+      radius,
       verticalOffset,
       correctedHeight,
       pcoL1,
       pcoL2,
       pcvZenith,
+      isCalibrated,
+      calibrationSource: matchResult ? matchResult.source : undefined,
+      rawRinexModel: metadata.antennaType || '',
     },
     velocities: {
       vx: 0,

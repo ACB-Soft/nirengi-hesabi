@@ -47,6 +47,9 @@ export interface AntennaData {
   pcoL1: { n: number; e: number; u: number }; // Phase Center Offset (mm)
   pcoL2: { n: number; e: number; u: number }; // Phase Center Offset (mm)
   pcvZenith: number[]; // PCV variations (mm)
+  isCalibrated?: boolean; // True if calibrated via NOAA/IGS or user-uploaded ATX
+  calibrationSource?: 'BUILTIN' | 'CUSTOM_ATX' | 'MANUAL';
+  rawRinexModel?: string; // Original unparsed model string from RINEX ANT # / TYPE
 }
 
 export interface StationVelocities {

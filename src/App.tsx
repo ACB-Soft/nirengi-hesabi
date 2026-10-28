@@ -20,10 +20,18 @@ import {
   perform3DNetworkAdjustment,
   generateBaselinesFromStations,
   runFullTopconWorkflow,
+  calculateCorrectedAntennaHeight,
+  calculateAntennaPhaseCenterHeight,
 } from './utils/geodesy';
 import { batchProcessNetworkBaselines, batchProcessNetworkBaselinesAsync } from './utils/rtklibEngine';
 import { WorkerProgressMessage } from './workers/gnssBaselineWorker';
 import { BroadcastEphemeris, parseRinexNavFile } from './utils/rinexNavParser';
+import {
+  getUncalibratedStations,
+  parseAntexContent,
+  saveMultipleCustomAntennas,
+  findAntennaInCatalog,
+} from './utils/antennaCatalogManager';
 
 import { JobConfigTab } from './components/JobConfigTab';
 import { StationsAntennaTab } from './components/StationsAntennaTab';
@@ -351,11 +359,103 @@ export default function App() {
     e.target.value = '';
   };
 
+  const handleGlobalAtxUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      let text = '';
+      if (file.name.toLowerCase().endsWith('.gz') || file.type.includes('gzip')) {
+        const ds = new DecompressionStream('gzip');
+        const stream = file.stream().pipeThrough(ds);
+        text = await new Response(stream).text();
+      } else {
+        text = await file.text();
+      }
+
+      if (text) {
+        const parsed = parseAntexContent(text);
+        if (parsed.length === 0) {
+          showToast('Geçerli bir ANTEX anten kalibrasyonu bulunamadı.');
+          return;
+        }
+
+        saveMultipleCustomAntennas(parsed);
+
+        // Update current stations with new calibrations
+        const updatedStations = { ...stations };
+        let count = 0;
+        for (const id in updatedStations) {
+          const st = updatedStations[id];
+          const match = findAntennaInCatalog(st.antenna?.model || st.antenna?.rawRinexModel || st.name);
+          if (match) {
+            const cal = match.calibration;
+            const isSlant = st.antenna?.heightType === 'slant';
+            const effectiveOffset = isSlant ? (cal.verticalOffset || 0) : 0;
+            const corrected = calculateCorrectedAntennaHeight(
+              st.antenna?.heightType || 'vertical',
+              st.antenna?.measuredHeight || 0,
+              cal.radius,
+              effectiveOffset
+            );
+            const apcCalc = calculateAntennaPhaseCenterHeight(
+              st.antenna?.heightType || 'vertical',
+              st.antenna?.measuredHeight || 0,
+              cal.radius,
+              effectiveOffset,
+              cal.pcoL1?.u ?? 89.35,
+              cal.pcoL2?.u ?? 117.76,
+              'L3'
+            );
+            const baseGroundH = st.groundH ?? st.h;
+
+            updatedStations[id] = {
+              ...st,
+              groundH: baseGroundH,
+              arpH: Number((baseGroundH + apcCalc.hArp).toFixed(4)),
+              apcH: Number((baseGroundH + apcCalc.hApcL3).toFixed(4)),
+              antenna: {
+                ...st.antenna,
+                model: cal.model,
+                radius: cal.radius,
+                verticalOffset: effectiveOffset,
+                correctedHeight: corrected,
+                pcoL1: cal.pcoL1,
+                pcoL2: cal.pcoL2,
+                pcvZenith: cal.pcvZenith,
+                isCalibrated: true,
+                calibrationSource: match.source,
+              },
+            };
+            count++;
+          }
+        }
+
+        if (count > 0) {
+          setStations(updatedStations);
+        }
+        showToast(`${parsed.length} anten kalibrasyonu kataloga kalıcı olarak kaydedildi. ${count > 0 ? `${count} istasyon kalibre edildi!` : ''}`);
+      }
+    } catch (err: any) {
+      console.error('ATX okuma hatası:', err);
+      showToast(`ATX yüklenirken hata: ${err?.message || err}`);
+    }
+    e.target.value = '';
+  };
+
   const handleSolveAllBaselinesAndAdjust = async () => {
     if (Object.keys(stations).length < 2) {
       showToast('Baz çözümü ve dengeleme için en az 2 istasyon gereklidir.');
       return;
     }
+
+    const uncalibrated = getUncalibratedStations(stations);
+    if (uncalibrated.length > 0) {
+      showToast(`Baz çözümü engellendi: [${uncalibrated.map(s => s.name).join(', ')}] istasyonlarının ANTEX anten kalibrasyonu eksiktir! Lütfen İstasyonlar sekmesinden ATX dosyasını yükleyin.`);
+      setActiveTab('stations');
+      return;
+    }
+
     setIsWorkerProcessing(true);
     showToast('Yerli GNSS Çift Fark ve LAMBDA motoru başlatıldı...');
 
@@ -709,6 +809,7 @@ export default function App() {
             onDeleteProject={handleDeleteProject}
             onRenameProject={handleRenameProject}
             onNavigateTab={(tab) => setActiveTab(tab as TabKey)}
+            onShowToast={showToast}
           />
         )}
 
@@ -756,6 +857,8 @@ export default function App() {
             onGenerateBaselines={handleGenerateBaselinesFromPoints}
             onSolveAllBaselinesAndAdjust={handleSolveAllBaselinesAndAdjust}
             onUploadNavFile={handleUploadNavFile}
+            onUploadAtxFile={handleGlobalAtxUpload}
+            onNavigateTab={(tab) => setActiveTab(tab as TabKey)}
             isWorkerProcessing={isWorkerProcessing}
             workerProgress={workerProgress}
           />

@@ -39,6 +39,7 @@ import {
 } from 'lucide-react';
 import { WorkerProgressMessage } from '../workers/gnssBaselineWorker';
 import { BroadcastEphemeris } from '../utils/rinexNavParser';
+import { getUncalibratedStations } from '../utils/antennaCatalogManager';
 
 interface Props {
   baselines: BaselineVector[];
@@ -51,6 +52,8 @@ interface Props {
   onGenerateBaselines?: () => void;
   onSolveAllBaselinesAndAdjust?: () => void;
   onUploadNavFile?: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onUploadAtxFile?: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onNavigateTab?: (tab: string) => void;
   isWorkerProcessing?: boolean;
   workerProgress?: WorkerProgressMessage | null;
 }
@@ -66,11 +69,18 @@ export const BaselinesTab: React.FC<Props> = ({
   onGenerateBaselines,
   onSolveAllBaselinesAndAdjust,
   onUploadNavFile,
+  onUploadAtxFile,
+  onNavigateTab,
   isWorkerProcessing = false,
   workerProgress,
 }) => {
   const stationList = Object.values(stations);
   const stationCount = stationList.length;
+
+  const uncalibratedStations = useMemo(() => {
+    return getUncalibratedStations(stations);
+  }, [stations]);
+  const isSolveBlocked = uncalibratedStations.length > 0;
 
   const [selectedBaselineId, setSelectedBaselineId] = useState<string>(baselines[0]?.id || '');
   const [filterType, setFilterType] = useState<'ALL' | 'FIX' | 'FLOAT'>('ALL');
@@ -218,9 +228,20 @@ export const BaselinesTab: React.FC<Props> = ({
 
             {stationCount >= 2 && (
               <button
-                onClick={handleOpenSolver}
-                className="px-3.5 py-2 text-xs font-bold bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-300 rounded-xl shadow-2xs transition flex items-center gap-1.5 cursor-pointer"
-                title="İki istasyon seçerek canlı çift fark baz çözümü yapın"
+                onClick={() => {
+                  if (isSolveBlocked) {
+                    alert(`Baz çözümü engellendi: ${uncalibratedStations.map(s => s.name).join(', ')} istasyonunun ANTEX anten kalibrasyonu eksiktir. Lütfen önce ATX dosyasını yükleyin.`);
+                    return;
+                  }
+                  handleOpenSolver();
+                }}
+                disabled={isSolveBlocked}
+                className={`px-3.5 py-2 text-xs font-bold border rounded-xl shadow-2xs transition flex items-center gap-1.5 ${
+                  isSolveBlocked
+                    ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60'
+                    : 'bg-sky-50 hover:bg-sky-100 text-sky-700 border-sky-300 cursor-pointer'
+                }`}
+                title={isSolveBlocked ? 'Baz çözümü engellendi: Anten kalibrasyonu eksik' : 'İki istasyon seçerek canlı çift fark baz çözümü yapın'}
               >
                 <Plus className="w-3.5 h-3.5 text-sky-600" />
                 <span>Tekil Baz Çöz</span>
@@ -240,15 +261,34 @@ export const BaselinesTab: React.FC<Props> = ({
 
             {onSolveAllBaselinesAndAdjust && stationCount >= 2 && (
               <button
-                onClick={onSolveAllBaselinesAndAdjust}
-                disabled={isWorkerProcessing}
-                className="px-4 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-sm transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
-                title="Web Worker çift fark ve LAMBDA motoru ile tüm bazları çözer ve 3D Dayalı Dengelemeye aktarır"
+                onClick={() => {
+                  if (isSolveBlocked) {
+                    alert(`Baz çözümü engellendi: ${uncalibratedStations.map(s => s.name).join(', ')} istasyonunun ANTEX anten kalibrasyonu eksiktir! Lütfen önce ATX dosyasını yükleyin.`);
+                    return;
+                  }
+                  onSolveAllBaselinesAndAdjust();
+                }}
+                disabled={isWorkerProcessing || isSolveBlocked}
+                className={`px-4 py-2 text-xs font-bold rounded-xl shadow-sm transition flex items-center gap-2 ${
+                  isSolveBlocked
+                    ? 'bg-rose-100 text-rose-500 border border-rose-300 cursor-not-allowed opacity-75'
+                    : 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer disabled:opacity-50'
+                }`}
+                title={
+                  isSolveBlocked
+                    ? `Baz çözümü bloke edildi: ${uncalibratedStations.map((s) => s.name).join(', ')} noktasının ANTEX kalibrasyonu eksik.`
+                    : 'Web Worker çift fark ve LAMBDA motoru ile tüm bazları çözer ve 3D Dayalı Dengelemeye aktarır'
+                }
               >
                 {isWorkerProcessing ? (
                   <>
                     <RefreshCw className="w-3.5 h-3.5 animate-spin text-white" />
                     <span>Çözülüyor ({workerProgress?.percent || 0}%)...</span>
+                  </>
+                ) : isSolveBlocked ? (
+                  <>
+                    <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
+                    <span>Çözüm Bloke Edildi (ATX Eksik)</span>
                   </>
                 ) : (
                   <>
@@ -260,6 +300,55 @@ export const BaselinesTab: React.FC<Props> = ({
             )}
           </div>
         </div>
+
+        {/* Fail-Safe Protection Banner for Baselines */}
+        {isSolveBlocked && (
+          <div className="p-4 bg-rose-50 border-2 border-rose-400 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-rose-950 shadow-sm animate-in fade-in">
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 rounded-xl bg-rose-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                <AlertTriangle className="w-5 h-5 text-white animate-pulse" />
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h4 className="text-sm font-extrabold text-rose-950">
+                    Baz Çözümü &amp; Ağ Dengeleme Bloke Edildi ({uncalibratedStations.length} İstasyon Kalibrasyonsuz)
+                  </h4>
+                  <span className="text-[10px] bg-rose-200 text-rose-900 border border-rose-300 px-2 py-0.5 rounded-full font-bold">
+                    BÖHYY &amp; IGS Güvenlik Koruması
+                  </span>
+                </div>
+                <p className="text-xs text-rose-800 leading-relaxed">
+                  Eksik Noktalar: <strong>{uncalibratedStations.map((s) => `${s.name} (${s.antenna?.model || s.antenna?.rawRinexModel || 'Tanımsız'})`).join(', ')}</strong>.
+                  Faz merkezi ofsetleri (PCO/PCV) olmadan çift fark bağıl koordinat hesabı <strong>5–15 cm düşey kota hatasına</strong> sebep olacağı için baz çözümü durdurulmuştur.
+                </p>
+              </div>
+            </div>
+
+            <div className="shrink-0 flex items-center gap-2 flex-wrap">
+              {onUploadAtxFile && (
+                <label className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm active:scale-95">
+                  <Upload className="w-3.5 h-3.5 text-white" />
+                  <span>Buradan ATX Yükle</span>
+                  <input
+                    type="file"
+                    accept=".atx,.txt,.atx.gz,.ATX,.TXT"
+                    onChange={onUploadAtxFile}
+                    className="hidden"
+                  />
+                </label>
+              )}
+              {onNavigateTab && (
+                <button
+                  type="button"
+                  onClick={() => onNavigateTab('stations')}
+                  className="px-3.5 py-2 bg-white hover:bg-rose-100 text-rose-800 border border-rose-300 rounded-xl text-xs font-bold transition cursor-pointer shadow-2xs"
+                >
+                  İstasyonlar Sekmesine Git &rarr;
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Live Web Worker Baseline Processing Banner */}
         {isWorkerProcessing && (

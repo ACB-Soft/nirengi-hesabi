@@ -238,3 +238,165 @@ export function verifyBackupIntegrity(data: any): VerificationResult {
     message: 'Doğrulama Başarısız: Bu dosya üzerindeki ölçüm veya dengeleme verileri harici olarak değiştirilmiştir.',
   };
 }
+
+/**
+ * Computes SHA-256 hash as hexadecimal string for binary data or text
+ */
+export function sha256Hex(data: Uint8Array | string): string {
+  const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+  const hash = sha256Bytes(bytes);
+  return Array.from(hash)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+export interface ArchiveManifestFile {
+  path: string;
+  size: number;
+  sha256: string;
+}
+
+export interface ArchiveManifest {
+  app: string;
+  version: string;
+  projectId: string;
+  projectName: string;
+  createdAt: string;
+  files: ArchiveManifestFile[];
+  signature?: string;
+  integrity?: {
+    algorithm: string;
+    signedAt: string;
+    totalFiles: number;
+  };
+}
+
+/**
+ * Signs an archive manifest containing all files and their SHA-256 hashes
+ */
+export function signArchiveManifest(manifest: Omit<ArchiveManifest, 'signature' | 'integrity'>): ArchiveManifest {
+  const canonical = canonicalizeJSON(manifest);
+  const signature = hmacSha256(canonical);
+
+  return {
+    ...manifest,
+    signature,
+    integrity: {
+      algorithm: 'HMAC-SHA256',
+      signedAt: new Date().toISOString(),
+      totalFiles: manifest.files.length,
+    },
+  };
+}
+
+export interface ArchiveVerificationResult {
+  isValid: boolean;
+  hasManifest: boolean;
+  tamperedFiles: string[];
+  missingFiles: string[];
+  extraFiles: string[];
+  signedAt?: string;
+  totalFilesVerified: number;
+  message: string;
+}
+
+/**
+ * Verifies archive manifest signature and checks whether any file has been tampered with
+ */
+export function verifyArchiveManifest(
+  manifest: ArchiveManifest,
+  actualFiles: Map<string, Uint8Array>
+): ArchiveVerificationResult {
+  if (!manifest || typeof manifest !== 'object') {
+    return {
+      isValid: false,
+      hasManifest: false,
+      tamperedFiles: [],
+      missingFiles: [],
+      extraFiles: [],
+      totalFilesVerified: 0,
+      message: 'Geçersiz arşiv manifestosu.',
+    };
+  }
+
+  const existingSignature = manifest.signature;
+  if (!existingSignature) {
+    return {
+      isValid: false,
+      hasManifest: false,
+      tamperedFiles: [],
+      missingFiles: [],
+      extraFiles: [],
+      totalFilesVerified: 0,
+      message: 'Arşivde kriptografik HMAC imzası bulunamadı.',
+    };
+  }
+
+  // 1. Verify manifest HMAC signature
+  const canonical = canonicalizeJSON(manifest);
+  const expectedSignature = hmacSha256(canonical);
+
+  if (existingSignature.toLowerCase().trim() !== expectedSignature.toLowerCase().trim()) {
+    return {
+      isValid: false,
+      hasManifest: true,
+      tamperedFiles: ['archive_manifest.json'],
+      missingFiles: [],
+      extraFiles: [],
+      totalFilesVerified: 0,
+      message: 'Güvenlik Uyarısı: Arşiv manifestosu veya HMAC dijital imzası harici olarak tahrif edilmiş!',
+    };
+  }
+
+  // 2. Verify all files recorded in manifest
+  const tamperedFiles: string[] = [];
+  const missingFiles: string[] = [];
+  const manifestPaths = new Set<string>();
+
+  for (const item of manifest.files) {
+    manifestPaths.add(item.path);
+    const content = actualFiles.get(item.path);
+
+    if (!content) {
+      missingFiles.push(item.path);
+      continue;
+    }
+
+    // Verify SHA-256 hash of actual file content
+    const actualHash = sha256Hex(content);
+    if (actualHash.toLowerCase() !== item.sha256.toLowerCase()) {
+      tamperedFiles.push(item.path);
+    }
+  }
+
+  // 3. Check for unauthorized injected extra files (excluding archive_manifest.json itself)
+  const extraFiles: string[] = [];
+  actualFiles.forEach((_, path) => {
+    if (path !== 'archive_manifest.json' && !manifestPaths.has(path)) {
+      extraFiles.push(path);
+    }
+  });
+
+  const isValid = tamperedFiles.length === 0 && missingFiles.length === 0 && extraFiles.length === 0;
+
+  let message = 'Bütünlük Doğrulandı: Tüm ölçü ve dengeleme dosyaları orijinal ve değiştirilmemiş.';
+  if (!isValid) {
+    const reasons: string[] = [];
+    if (tamperedFiles.length > 0) reasons.push(`Değiştirilmiş dosya (${tamperedFiles.join(', ')})`);
+    if (missingFiles.length > 0) reasons.push(`Eksik dosya (${missingFiles.join(', ')})`);
+    if (extraFiles.length > 0) reasons.push(`İzinsiz eklenmiş dosya (${extraFiles.join(', ')})`);
+    message = `Tahrifat Uyarısı: ${reasons.join(' | ')}`;
+  }
+
+  return {
+    isValid,
+    hasManifest: true,
+    tamperedFiles,
+    missingFiles,
+    extraFiles,
+    signedAt: manifest.integrity?.signedAt,
+    totalFilesVerified: manifest.files.length,
+    message,
+  };
+}
+

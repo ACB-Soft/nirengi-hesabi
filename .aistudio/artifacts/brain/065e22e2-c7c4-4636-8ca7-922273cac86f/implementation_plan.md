@@ -1,129 +1,116 @@
-# Yerli GNSS Taşıyıcı Faz Baz Çözücü (Native Baseline Processor) & Ağ Dengelemesi İş Planı
+# Tek Tıkla "Tam Proje Arşivi (.zip)" Dışa & İçe Aktarma Planı (HMAC Korumalı)
 
-Topcon Tools veya harici ticari yazılımlara bağımlılığı tamamen ortadan kaldırarak, ham RINEX gözlemlerinden çift fark (Double-Difference) taşıyıcı faz baz vektörlerini ($\Delta X, \Delta Y, \Delta Z$) ve $3\times3$ varyans-kovaryans matrislerini bağımsız olarak çözen ve tek tıkla 3D ağ dengelemesine aktaran yerli GNSS çekirdeği mimarisi.
+## 1. Kullanıcı Talebi ve Güvenlik Hedefi
+Kullanıcı, dışa aktarılan ve içeri aktarılan `.zip` arşiv paketinin tamamına **HMAC koruması** uygulanmasını; orijinal dosyalarda ve ham RINEX ölçülerinde harici herhangi bir tahrifat/değişiklik yapılmasına karşı kesin koruma sağlanmasını talep etmektedir.
 
-## Kullanıcı İncelemesi & Kritik Kararlar
-
-> [!IMPORTANT]
-> Kullanıcı ile yapılan ön görüşmede onaylanan mimari kararlar aşağıda özetlenmiştir:
-> 
-> * **Motor Mimarisi:** Tarayıcı ana iş parçacığını (UI thread) kilitlemeyen, arka planda paralel çalışan **İstemci Taraflı Web Worker GNSS Çözüm Motoru**.
-> * **Yörünge Efemeris Stratejisi:** Hem saha anlık çözümleri için **RINEX Navigasyon (.nav / .n / .g Keplerian Efemeris)** hem de milimetrik jeodezik çözümler için **IGS Hassas Yörünge (.SP3)** hibrit desteği.
-> * **Kullanıcı İş Akışı:** Tek tıkla ağdaki tüm bağımsız bazları otomatik tespit eden, çift fark faz çözümüyle belirsizlikleri sabitleyen (FIX) ve doğrudan 3D Gauss-Markov dengelemesine besleyen **"Tek Tıkla Tüm Ağı Çöz ve Dengele"** entegrasyonu.
-
----
-
-## 1. Genel Bakış & Temel Konsept
-
-Uygulama, bugüne kadar yalnızca bir **Ağ Dengeleme Motoru (Network Adjustment Engine)** olarak çalışmaktaydı ve baz vektörlerini RINEX başlığındaki yaklaşık tek nokta navigasyon koordinatlarından ($\sim 2\text{ m}$ hatalı `APPROX POSITION XYZ`) türetmekteydi. Bu durum Topcon Tools ile karşılaştırıldığında 2.07 metrelik yatay fark oluşturuyordu.
-
-Bu iş planı ile uygulamaya **Bağımsız GNSS Taşıyıcı Faz Çift Fark Çözüm Çekirdeği (Carrier-Phase Double-Difference Engine)** entegre edilecektir:
-1. Yüklenen RINEX `.obs` gözlem dosyalarından $L_1, L_2$ taşıyıcı fazları, $C_1, P_1, P_2$ kod ölçüleri okunacak ve epoklar ortaklaştırılacaktır.
-2. Broadcast efemeris (Kepler denklemleri) veya IGS SP3 yörüngeleri üzerinden uyduların sinyal gönderme anındaki ECEF koordinatları tam zamanında hesaplanacaktır.
-3. Çift fark faz denklemleri kurularak saat hataları ve atmosferik ortak gecikmeler elimine edilecektir.
-4. **LAMBDA (Least-squares AMBiguity Decorrelation Adjustment)** algoritmasıyla tamsayı faz belirsizlikleri çözülecek ($R \ge 3.0$ ile **FIX** çözüme ulaşılacaktır).
-5. Elde edilen gerçek baz vektörleri ($\Delta X, \Delta Y, \Delta Z$) ve $3\times3$ kovaryans matrisi doğrudan 3D En Küçük Kareler dengelemesine aktarılacaktır.
+Yapılan netleştirmeler ve güvenlik ilkeleri:
+- **Paket İçeriği:** İmzalı `proje_verileri.json` + `archive_manifest.json` (HMAC imzalı kriptografik dosya listesi) + OPFS ham RINEX dosyaları (`.obs`, `.24o`, `.nav`) + BÖHYY Dengeleme Özeti (`dengeleme_ozeti.txt`) + `README_ARSIV.txt`.
+- **Uçtan Uca HMAC Koruma Zinciri:**
+  1. Arşivdeki her bir dosyanın (ham RINEX dosyaları dahil) kriptografik SHA-256 hash özeti hesaplanır.
+  2. Dosya listesi, boyutları ve hash'leri içeren `archive_manifest.json` oluşturulur.
+  3. Manifestoya gizli anahtarlı **HMAC-SHA256** dijital imzası uygulanır.
+- **İçe Aktarmada Bütünlük Doğrulaması (Anti-Tamper Verification):**
+  - ZIP açıldığında önce `archive_manifest.json` dosyasının HMAC imzası denetlenir.
+  - Ardından arşivdeki her bir ham dosya (RINEX gözlemleri, navigasyon ve json verisi) tek tek hash kontrolünden geçirilir.
+  - Herhangi bir dosyada 1 bayt dahi değişiklik yapılmışsa, dosya silinmiş veya eklenmişse içe aktarma derhal durdurulur ve kullanıcıya net bir tahrifat uyarısı verilir.
+- **Çalışma Prensibi:** `jszip` ile istemci tarafında %100 yerel, çevrimdışı ve tarayıcı belleğini koruyan akışlı işlem.
 
 ---
 
-## 2. Kullanıcı Deneyimi & Arayüz Akışı
+## 2. Mimari, Ergonomi ve Tasarım Kararları
 
-### A. Adım Adım Kullanıcı Akışı
-1. **Veri Yükleme (Veri Girişi Sekmesi):**
-   * Kullanıcı CORS ve Rover RINEX gözlem dosyalarını (`.o`, `.obs`) ve varsa Navigasyon (`.nav`, `.n`) veya IGS `.SP3` dosyasını yükler.
-2. **Baz Vektörleri Sekmesi (Yeni Motor Arayüzü):**
-   * **"Tek Tıkla Tüm Ağı Çöz ve Dengele"** butonu tetiklenir.
-   * Web Worker arka planda çalışmaya başlar, UI kilitlenmeden canlı ilerleme çubuğu gösterilir (örneğin `%45 - BAN1 -> N.1002 bazı çözülüyor, 18 uydu, Ratio: 24.8 [FIX]`).
-3. **Baz Çözüm Denetim Masası:**
-   * Çözülen her baz için:
-     * Durum: **FIX** (yeşil rozet) veya **FLOAT**
-     * Doğrulama Oranı: **Ratio Test** ($R \ge 3.0$)
-     * Koordinat Farkları: $\Delta X, \Delta Y, \Delta Z$ (m)
-     * Mekansal Duyarlık: $\sigma = \sqrt{\sigma_X^2 + \sigma_Y^2 + \sigma_Z^2}$ (mm)
-     * $3\times3$ Varyans-Kovaryans Detayları ($Q_{xx}, Q_{yy}, Q_{zz}, Q_{xy}, Q_{yz}, Q_{zx}$)
-4. **Otomatik Dengeleme Geçişi:**
-   * Çözülen bazlar 3D ağ dengelemesi sekmesine aktarılır; elde edilen nihai koordinatlar Topcon Tools sonuçlarıyla **milimetre düzeyinde** birebir örtüşür.
-
-### B. Görsel Kimlik & Arayüz Standartları
-* **Tipografi:** Koordinat, baz uzunluğu ve varyans değerlerinde `font-mono tabular-nums` kullanımı ile sarsıntısız sayısal hizalama.
-* **Renk Paleti (60-30-10 Kuralı):**
-  * %60 Nötr Zemin (`#F8FAFC` slate zemin)
-  * %30 Yapısal Paneller (`#FFFFFF` kartlar, 1px `#E2E8F0` kılcal sınırlar)
-  * %10 Odak Aksanları: FIX çözümler için zümrüt yeşili (`#059669`), hesaplama aksiyonları için derin kobalt (`#2563EB`).
-* **Sıfır-Pill Disiplini:** Statik veriler sade metin ve tipografik ayraçlarla (`·`) sunulacak; pill/rozetler yalnızca tıklanabilir etkileşimli filtrelerde kullanılacaktır.
-
----
-
-## 3. Ürün & Mimari Kararları (Trade-Offs)
-
-| Karar | Seçilen Yaklaşım | Tercih Nedeni | Alternatif & Reddedilme Sebebi |
-| :--- | :--- | :--- | :--- |
-| **İşleme Ortamı** | İstemci Taraflı Web Worker | Kullanıcı verileri gizli kalır (KVKK/veri güvenliği), sunucu maliyeti sıfırdır, offline/çevrimdışı çalışır. | Sunucu tabanlı C servisi: Yüksek sunucu kiralama maliyeti ve veri aktarım gecikmesi yaratır. |
-| **Faz Belirsizliği** | LAMBDA Algoritması | GNSS jeodezisinde dünya standardıdır; bağımsız faz belirsizliklerini köşegenleştirerek milimetrik FIX üretir. | Basit yuvarlama (Rounding): Uzun bazlarda (>10 km) hatalı tamsayı seçer ve santimetrelerce kaymaya neden olur. |
-| **Yörünge Modeli** | RINEX Nav (.nav) + SP3 Hibrit | Sahada anında çözüm için `.nav` broadcast efemerisleri yeterlidir; istenirse milimetrik SP3 devreye girer. | Sadece SP3 zorunluluğu: Kullanıcı IGS ürünü yayınlanana kadar 12-24 saat beklemek zorunda kalırdı. |
-
----
-
-## 4. Teknik Mimari & Veri Akışı
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                       KULLANICI ARAYÜZÜ (REACT SPA)                         │
-│  ┌───────────────────────┐  ┌───────────────────────┐  ┌─────────────────┐  │
-│  │  Veri Girişi (RINEX)  │  │ Baz Çözücü Masası     │  │ 3D Dengeleme    │  │
-│  │  .obs, .nav, .sp3     │  │ Canlı İlerleme & FIX  │  │ Gauss-Markov    │  │
-│  └──────────┬────────────┘  └──────────▲────────────┘  └────────▲────────┘  │
-└─────────────┼──────────────────────────┼────────────────────────┼───────────┘
-              │                          │ PostMessage            │
-              ▼                          │ State Update           │
-┌────────────────────────────────────────┴────────────────────────┴───────────┐
-│              WEB WORKER MOTORU: gnssBaselineWorker.ts                       │
-│                                                                             │
-│  1. RINEX GÖZLEM AYRIŞTIRICI & EPOK EŞLEŞTİRME                              │
-│     • Base ve Rover epoklarının tamsayı zaman diliminde senkronizasyonu    │
-│     • L1, L2 taşıyıcı fazları, C1, P2 pseudorange filtrelemesi             │
-│                                                                             │
-│  2. UYDU YÖRÜNGE HESAPLAYICI (ORBIT ENGINE)                                 │
-│     • RINEX NAV Kepler efemerisleri: X(t), Y(t), Z(t) + Saat Düzeltmesi    │
-│     • Sinyal seyahat süresi (τ) ve Dünya dönme düzeltmesi (Sagnac etkisi)  │
-│                                                                             │
-│  3. ÇİFT FARK (DOUBLE DIFFERENCE) MATRİS ÇEKİRDEĞİ                          │
-│     • Pivot uydu seçimi (Zenit'e en yakın, en yüksek elevasyon açılı)      │
-│     • Tek fark (Receiver clock yok etme) + Çift fark (Sat clock yok etme)  │
-│     • Tasarım matrisi B ve Ağırlık matrisi P_DD kurulumu                   │
-│                                                                             │
-│  4. LAMBDA TAMSAYI FAZ BELİRSİZLİĞİ & RATIO TESTİ                           │
-│     • Z-dönüşümü ile kovaryans dekorrelasyonu                              │
-│     • Tamsayı arama (Integer Ambiguity Search: N1, N2)                     │
-│     • Ratio Test: R = Ω2 / Ω1 >= 3.00 => FIX Çözüm                         │
-│                                                                             │
-│  5. ÇÖZÜLMÜŞ BAZ VEKTÖRÜ & 3x3 KOVARYANS ÇIKTISI                            │
-│     • ΔX, ΔY, ΔZ ve Qxx, Qyy, Qzz, Qxy, Qyz, Qzx varyans-kovaryansları     │
-└─────────────────────────────────────────────────────────────────────────────┘
+### 2.1. Güvenli ZIP Arşiv Hiyerarşisi
+```text
+[PROJE_ADI]_GNSS_Arsivi.zip
+├── archive_manifest.json        # HMAC-SHA256 imzalı kriptografik dosya listesi & SHA-256 hash'leri
+├── proje_verileri.json          # Proje ayarları, koordinatlar, bazlar ve dengeleme sonuçları
+├── dengeleme_ozeti.txt          # BÖHYY dengeleme karnesi ve duyarlık göstergeleri
+├── README_ARSIV.txt             # Arşiv künyesi ve doğrulama sertifika bilgisi
+└── rinex/                       # Orijinal ham RINEX dosyaları
+    ├── IST1.24o                 # 1. İstasyon ham gözlem dosyası
+    ├── IST2.24o                 # 2. İstasyon ham gözlem dosyası
+    ├── ROV1.24o                 # Rover ham gözlem dosyası
+    └── brdc1200.24n             # Broadcast navigasyon dosyası
 ```
 
-### Uygulama Bileşenleri & Dosya Haritası
-1. `src/workers/gnssBaselineWorker.ts`:
-   * Web Worker arka plan iş parçacığı.
-   * RINEX gözlem epoklarının senkronizasyonu, Kepler yörünge hesabı, DD tasarımı ve LAMBDA algoritması.
-2. `src/utils/rinexNavParser.ts`:
-   * RINEX v2/v3 GPS ve GLONASS navigasyon efemerislerini (`.nav`, `.n`, `.g`) ayrıştıran, uydu ECEF koordinatlarını milimetrik hesaplayan modül.
-3. `src/utils/lambdaSolver.ts`:
-   * LAMBDA (Least-squares AMBiguity Decorrelation Adjustment) çekirdeği: Z-dönüşümü, LDL ayrışımı, elipsoit arama ve Ratio testi.
-4. `src/components/BaselinesTab.tsx`:
-   * "Tek Tıkla Tüm Ağı Çöz ve Dengele" kontrolü, canlı Worker ilerleme göstergesi ve çözülen vektörlerin Topcon Tools standartlarında doğrulanması.
-5. `src/utils/geodesy.ts`:
-   * Gerçek faz baz vektörlerinin 3D Gauss-Markov dengelemesine pürüzsüz aktarımı.
+### 2.2. Kriptografik Manifest Yapısı (`archive_manifest.json`)
+```json
+{
+  "app": "ACB Maps - Nirengi Hesabı & GNSS Arşiv Yöneticisi",
+  "version": "1.0",
+  "projectId": "project-1718000000",
+  "projectName": "Bursa Nilüfer GNSS Ağı",
+  "createdAt": "2026-10-25T10:00:00.000Z",
+  "files": [
+    {
+      "path": "proje_verileri.json",
+      "size": 45120,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "rinex/IST1.24o",
+      "size": 14205560,
+      "sha256": "4b227777d4dd1fc61c6f884f48641d02b4d121d3fd328cb08b5531fcacdabf8a"
+    },
+    {
+      "path": "dengeleme_ozeti.txt",
+      "size": 8420,
+      "sha256": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+    }
+  ],
+  "integrity": {
+    "algorithm": "HMAC-SHA256",
+    "signedAt": "2026-10-25T10:00:00.000Z",
+    "totalFiles": 3
+  },
+  "signature": "a6c905b7... (HMAC-SHA256 İmzası)"
+}
+```
+
+### 2.3. Doğrulama ve Güvenlik Kuralları
+1. **İmza Kontrolü:** Manifestodaki `signature` değeri gizli anahtar ve normalize edilmiş manifest içeriğiyle doğrulanır.
+2. **Hash Uyuşmazlığı Kontrolü:** ZIP içindeki her dosyanın baytları okunarak SHA-256 hash'i hesaplanır ve manifestodaki değerle karşılaştırılır.
+3. **Ek Dosya / Eksik Dosya Kontrolü:** Arşivde manifestoda olmayan fazladan bir dosya varsa veya manifestoda geçen bir dosya silinmişse arşiv doğrudan geçersiz sayılır.
+4. **Kullanıcı Bildirimi:** Başarılı doğrulamada yeşil kilit ikonu ve "Bütünlük Doğrulandı: Tüm ölçü ve dengeleme dosyaları orijinal ve değiştirilmemiştir" rozeti; tahrifat tespitinde ise kırmızı uyarı kalkanı ve değiştirilen dosya listesi sunulur.
 
 ---
 
-## 5. Doğrulama & Kabul Kriterleri
+## 3. Adım Adım Dosya Değişiklik Planı
 
-1. **Topcon Tools Birebir Doğrulaması:**
-   * Test verinizdeki `BAN1`, `BILE`, `BRS1`, `HARC` referansları ve `N.1002` (3552329) gezicisi kendi yerli motorumuz ile çözüldüğünde;
-     * Topcon Tools $4497678.066\text{ m}$ (Northing) ve $455876.517\text{ m}$ (Easting) değerlerine **santimetre altı (milimetrik)** hassasiyetle ulaşmalıdır.
-     * 2.07 metrelik navigasyon kayması **tamamen ortadan kalkmalıdır**.
-2. **Performans Kriteri:**
-   * 4 sabit ve 1 gezici arasındaki 4 baz vektörü, tarayıcıda Web Worker üzerinden **5 saniyenin altında** çözülmelidir.
-3. **Derleme & Hata Denetimi:**
-   * `lint_applet` ve `compile_applet` sıfır hata ile tamamlanmalıdır.
+### Adım 1: Bağımlılık Kurulumu
+- `jszip` ve `@types/jszip` paketlerinin `install_applet_package` ile projeye eklenmesi.
+
+### Adım 2: Kriptografik Fonksiyonların Genişletilmesi (`src/utils/backupIntegrity.ts`)
+- `calculateFileSha256(file: File | Uint8Array): Promise<string>` fonksiyonunun eklenmesi (bayt bazlı akışlı hashleme).
+- `signArchiveManifest` ve `verifyArchiveManifest` fonksiyonlarının oluşturulması.
+
+### Adım 3: Güvenli Arşiv Yöneticisi Modülü (`src/utils/projectArchiveManager.ts`)
+- `exportSecureProjectZipArchive(project, options, onProgress)`:
+  - OPFS'deki ham RINEX dosyalarını toplama.
+  - Her bir dosyanın SHA-256 hash'ini hesaplama.
+  - Manifestoyu üretip HMAC-SHA256 ile imzalama.
+  - ZIP arşivine dosyaları ekleyip kullanıcıya indirme bağlantısı üretme.
+- `importSecureProjectZipArchive(zipFile, onProgress)`:
+  - ZIP arşivini açma.
+  - `archive_manifest.json` dosyasını çıkarma ve HMAC imzasını doğrulama.
+  - Tüm dosyaların SHA-256 hash'lerini karşılaştırma.
+  - Bütünlük sağlandıysa ham RINEX dosyalarını OPFS'e aktarma, proje JSON'unu sisteme yükleme.
+  - Tahrifat varsa kullanıcıya hangi dosyanın değiştirildiğini belirten hata fırlatma.
+
+### Adım 4: Kullanıcı Arayüzü Entegrasyonu (`src/components/HomeTab.tsx` & `src/App.tsx`)
+- "Proje Yükle" modalına **"HMAC Korumalı Tam Proje Arşivi Yükle (.zip)"** butonu ve sürükle-bırak desteği.
+- Arşiv yüklenirken açılan **Doğrulama ve İlerleme Modalı**:
+  - Adım 1: HMAC İmza Doğrulaması.
+  - Adım 2: Ham RINEX Ölçü Dosyaları Hash Kontrolü.
+  - Adım 3: OPFS Yerel Diskine Güvenli Aktarım.
+- Proje listesinde her satıra "Tam Arşiv İndir (.zip)" butonu.
+
+### Adım 5: Raporlar Sekmesi Entegrasyonu (`src/components/ReportExportTab.tsx`)
+- Raporlar sekmesine "Kriptografik HMAC Korumalı Proje Arşivi (.zip)" kartı eklenmesi.
+
+---
+
+## 4. Doğrulama ve Test Planı
+1. **Derleme ve Tip Denetimi:** `lint_applet` (`tsc --noEmit`) ve `compile_applet` ile sıfır hata doğrulama.
+2. **Normal Akış Testi:** Proje oluşturma, `.zip` olarak dışa aktarma ve ardından aynı `.zip` dosyasını geri yükleyip tüm istasyon ve OPFS RINEX dosyalarının başarıyla açıldığını teyit etme.
+3. **Tahrifat / Değiştirilme Testi:** ZIP içindeki bir RINEX dosyasının veya JSON metninin 1 karakteri değiştirildiğinde sistemin bunu yakalayıp tahrifat uyarısı verdiğini ve projeyi yüklemeyi reddettiğini doğrulama.
