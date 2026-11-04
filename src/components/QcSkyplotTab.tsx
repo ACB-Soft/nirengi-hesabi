@@ -2,20 +2,25 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  * 
- * Kalite Kontrol (QC) & İnteraktif Skyplot Modülü (Faz 2)
- * Grounded in PyRINEX & RTKLIB workflows.
- * Provides interactive Polar Skyplot, elevation masks, satellite sky tracks,
- * multi-constellation filtering, DOP geometric dilution, SNR time series, and multipath analysis.
+ * Kalite Kontrol (QC) & GNSS Görüntüleme Pencereleri (Topcon Tools Suite)
+ * Provides professional geodetic viewing windows matching Topcon Tools / TBC:
+ * 1. Oturum Görünümü (Occupation View): Multi-station tree with PRNs and timeline tracking
+ * 2. Ağ Haritası (CAD Map View): CAD coordinate grid with Northing/Easting metric rulers & baselines
+ * 3. Bölünmüş Görünüm (Split View): Simultaneous CAD Map and Occupation timeline display
+ * 4. Kutupsal Gökyüzü (Polar Skyplot): Satellite sky tracks & elevation mask
+ * 5. SNR & Sinyal Analizi: Signal-to-noise ratio time series
  */
 
 import React, { useState, useMemo } from 'react';
-import { Station, GnssConstellation } from '../types/gnss';
+import { Station, GnssConstellation, BaselineVector } from '../types/gnss';
 import {
   SatelliteSkyTrack,
   polarToCartesian,
   generateSatelliteSkyTracks,
   computeDopMetrics,
 } from '../utils/skyplotEngine';
+import { TopconOccupationViewer } from './TopconOccupationViewer';
+import { TopconCadMapViewer } from './TopconCadMapViewer';
 import {
   Radio,
   Clock,
@@ -35,10 +40,17 @@ import {
   Eye,
   RefreshCw,
   Upload,
+  LayoutGrid,
+  Columns,
+  Maximize2,
 } from 'lucide-react';
+
+export type ViewWindowMode = 'occupation' | 'cad_map' | 'split' | 'skyplot' | 'snr';
 
 interface Props {
   stations: Record<string, Station>;
+  baselines?: BaselineVector[];
+  timeZone?: string;
   elevationMask?: number;
   onOpenRinexModal?: () => void;
   selectedStationId?: string;
@@ -47,6 +59,8 @@ interface Props {
 
 export const QcSkyplotTab: React.FC<Props> = ({
   stations,
+  baselines = [],
+  timeZone = 'GMT+3:00',
   elevationMask = 10,
   onOpenRinexModal,
   selectedStationId,
@@ -70,25 +84,25 @@ export const QcSkyplotTab: React.FC<Props> = ({
   const currentStation = stations[activeStationId] || stationList[0];
   const occupation = currentStation?.occupation;
 
-  // View States
+  // Viewing Window Mode: default to 'split' or 'occupation'
+  const [windowMode, setWindowMode] = useState<ViewWindowMode>('split');
+
+  // View States for Skyplot
   const [selectedSystem, setSelectedSystem] = useState<string>('ALL');
   const [maskAngle, setMaskAngle] = useState<number>(elevationMask);
   const [selectedSatId, setSelectedSatId] = useState<string | null>(null);
   const [hoveredSatId, setHoveredSatId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'skyplot' | 'snr' | 'timeline'>('skyplot');
 
   // Compute Satellite Tracks
   const allSatTracks: SatelliteSkyTrack[] = useMemo(() => {
     if (!currentStation) return [];
 
-    // If station has parsed satellites, use them
     if (occupation?.satellites && occupation.satellites.length > 0) {
       return occupation.satellites.map((sat) =>
         generateSatelliteSkyTracks(sat, currentStation, occupation.durationSeconds, maskAngle)
       );
     }
 
-    // Default realistic multi-GNSS tracking if only header was loaded
     const defaultSats = [
       { satId: 'G01', system: 'GPS' as GnssConstellation, prn: 1, totalEpochs: 480, validEpochs: 480, startSec: 0, endSec: 14400, timeSlots: [], freqs: ['L1', 'L2'] },
       { satId: 'G03', system: 'GPS' as GnssConstellation, prn: 3, totalEpochs: 480, validEpochs: 460, startSec: 1200, endSec: 14400, timeSlots: [], freqs: ['L1', 'L2'] },
@@ -101,10 +115,7 @@ export const QcSkyplotTab: React.FC<Props> = ({
       { satId: 'R14', system: 'GLONASS' as GnssConstellation, prn: 14, totalEpochs: 480, validEpochs: 480, startSec: 0, endSec: 10500, timeSlots: [], freqs: ['L1', 'L2'] },
       { satId: 'E03', system: 'Galileo' as GnssConstellation, prn: 3, totalEpochs: 480, validEpochs: 480, startSec: 600, endSec: 14400, timeSlots: [], freqs: ['E1', 'E5a'] },
       { satId: 'E08', system: 'Galileo' as GnssConstellation, prn: 8, totalEpochs: 480, validEpochs: 480, startSec: 0, endSec: 14000, timeSlots: [], freqs: ['E1', 'E5a'] },
-      { satId: 'E24', system: 'Galileo' as GnssConstellation, prn: 24, totalEpochs: 480, validEpochs: 480, startSec: 2000, endSec: 14400, timeSlots: [], freqs: ['E1', 'E5a'] },
       { satId: 'C06', system: 'BeiDou' as GnssConstellation, prn: 6, totalEpochs: 480, validEpochs: 480, startSec: 0, endSec: 14400, timeSlots: [], freqs: ['B1', 'B2'] },
-      { satId: 'C11', system: 'BeiDou' as GnssConstellation, prn: 11, totalEpochs: 480, validEpochs: 480, startSec: 1500, endSec: 14400, timeSlots: [], freqs: ['B1', 'B2'] },
-      { satId: 'C23', system: 'BeiDou' as GnssConstellation, prn: 23, totalEpochs: 480, validEpochs: 480, startSec: 0, endSec: 12000, timeSlots: [], freqs: ['B1', 'B2'] },
     ];
 
     return defaultSats.map((sat) =>
@@ -136,21 +147,14 @@ export const QcSkyplotTab: React.FC<Props> = ({
         return { stroke: '#0284C7', fill: '#0369A1', bg: 'bg-sky-500', text: 'text-sky-700', badge: 'bg-sky-100 text-sky-800' };
       case 'BeiDou':
         return { stroke: '#F59E0B', fill: '#D97706', bg: 'bg-amber-500', text: 'text-amber-700', badge: 'bg-amber-100 text-amber-800' };
-      case 'QZSS':
-        return { stroke: '#8B5CF6', fill: '#7C3AED', bg: 'bg-purple-500', text: 'text-purple-700', badge: 'bg-purple-100 text-purple-800' };
       default:
         return { stroke: '#64748B', fill: '#475569', bg: 'bg-slate-500', text: 'text-slate-700', badge: 'bg-slate-100 text-slate-800' };
     }
   };
 
-  // Selected track details
   const activeTrack = useMemo(() => {
-    if (selectedSatId) {
-      return allSatTracks.find((t) => t.satId === selectedSatId);
-    }
-    if (hoveredSatId) {
-      return allSatTracks.find((t) => t.satId === hoveredSatId);
-    }
+    if (selectedSatId) return allSatTracks.find((t) => t.satId === selectedSatId);
+    if (hoveredSatId) return allSatTracks.find((t) => t.satId === hoveredSatId);
     return filteredTracks[0] || null;
   }, [selectedSatId, hoveredSatId, allSatTracks, filteredTracks]);
 
@@ -163,8 +167,8 @@ export const QcSkyplotTab: React.FC<Props> = ({
         <div className="space-y-1">
           <h3 className="text-base font-bold text-slate-800">Kalite Kontrol (QC) İçin İstasyon Bulunmuyor</h3>
           <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
-            Gökyüzü uyduları kutupsal görünümü (Skyplot) ve sinyal kalitesi (SNR) analizi için önce 
-            <strong> Veri Girişi</strong> sekmesinden RINEX dosyası yükleyiniz.
+            Oturum çizelgesi (Occupation View), CAD ağ haritası ve uydu gökyüzü analizleri için 
+            lütfen <strong>İstasyonlar & RINEX</strong> sekmesinden veri ekleyiniz.
           </p>
         </div>
         {onOpenRinexModal && (
@@ -183,511 +187,602 @@ export const QcSkyplotTab: React.FC<Props> = ({
   // Polar Diagram Geometry: 400x400 SVG box
   const center = 200;
   const radius = 170;
-  // Radius for mask angle
   const maskRadius = radius * ((90 - maskAngle) / 90.0);
 
+  const handleSelectStationInternal = (stnId: string) => {
+    setActiveStationId(stnId);
+    if (onSelectStation) onSelectStation(stnId);
+  };
+
   return (
-    <div className="space-y-5 animate-in fade-in">
-      {/* Top Banner / Station Selection */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div className="space-y-4 animate-in fade-in">
+      
+      {/* Top Banner & Window View Switcher Toolbar */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
-            <h2 className="text-lg font-extrabold text-slate-900">
-              Kalite Kontrol ve Uydu Haritası (Skyplot)
+            <h2 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
+              <span>Kalite Kontrol & GNSS Görüntüleme Pencereleri</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold border border-emerald-300">
+                Topcon Tools Standart
+              </span>
             </h2>
-            <p className="text-xs text-slate-500 mt-1">
-              Uyduların kutupsal gökyüzü konumları, maske açısı ({maskAngle}°), DOP metrikleri ve sinyal kalitesi (SNR).
+            <p className="text-xs text-slate-500 mt-0.5">
+              Oturum zaman çizelgeleri, CAD koordinat ağ haritası, kutupsal gökyüzü görünürlüğü ve SNR analizleri.
             </p>
           </div>
 
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="flex items-center gap-2">
-              <label className="text-xs font-semibold text-slate-600 flex items-center gap-1.5">
-                <Radio className="w-3.5 h-3.5 text-sky-600" />
-                <span>İstasyon:</span>
-              </label>
-              <select
-                value={activeStationId}
-                onChange={(e) => {
-                  setActiveStationId(e.target.value);
-                  if (onSelectStation) onSelectStation(e.target.value);
-                }}
-                className="px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 shadow-2xs focus:ring-2 focus:ring-sky-500"
-              >
-                {stationList.map((st) => (
-                  <option key={st.id} value={st.id}>
-                    {st.name} ({st.type === 'CORS' ? 'CORS Sabit' : 'Rover Nokta'})
-                  </option>
-                ))}
-              </select>
-            </div>
+          {/* Window Mode Switcher Buttons */}
+          <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl text-xs overflow-x-auto">
+            <button
+              onClick={() => setWindowMode('split')}
+              className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition whitespace-nowrap ${
+                windowMode === 'split'
+                  ? 'bg-white text-slate-900 shadow-2xs border border-slate-200'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <LayoutGrid className="w-3.5 h-3.5 text-blue-600" />
+              <span>Bölünmüş Pencere</span>
+            </button>
 
-            {onOpenRinexModal && (
-              <button
-                onClick={onOpenRinexModal}
-                className="px-3 py-2 text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white rounded-xl shadow-xs transition flex items-center gap-1.5"
-              >
-                <Upload className="w-3.5 h-3.5 text-sky-400" />
-                <span>RINEX Yükle</span>
-              </button>
-            )}
+            <button
+              onClick={() => setWindowMode('occupation')}
+              className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition whitespace-nowrap ${
+                windowMode === 'occupation'
+                  ? 'bg-white text-slate-900 shadow-2xs border border-slate-200'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Clock className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Oturum Görünümü</span>
+            </button>
+
+            <button
+              onClick={() => setWindowMode('cad_map')}
+              className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition whitespace-nowrap ${
+                windowMode === 'cad_map'
+                  ? 'bg-white text-slate-900 shadow-2xs border border-slate-200'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Compass className="w-3.5 h-3.5 text-sky-600" />
+              <span>Ağ Haritası (CAD)</span>
+            </button>
+
+            <button
+              onClick={() => setWindowMode('skyplot')}
+              className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition whitespace-nowrap ${
+                windowMode === 'skyplot'
+                  ? 'bg-white text-slate-900 shadow-2xs border border-slate-200'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Satellite className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Kutup (Skyplot)</span>
+            </button>
+
+            <button
+              onClick={() => setWindowMode('snr')}
+              className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition whitespace-nowrap ${
+                windowMode === 'snr'
+                  ? 'bg-white text-slate-900 shadow-2xs border border-slate-200'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <BarChart2 className="w-3.5 h-3.5 text-amber-600" />
+              <span>SNR Serisi</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Quick Station Selector Bar */}
+        <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-slate-600 flex items-center gap-1">
+              <Radio className="w-3.5 h-3.5 text-sky-600" />
+              <span>Aktif İstasyon:</span>
+            </span>
+            <select
+              value={activeStationId}
+              onChange={(e) => handleSelectStationInternal(e.target.value)}
+              className="px-2.5 py-1 bg-slate-50 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 shadow-2xs focus:ring-1 focus:ring-sky-500"
+            >
+              {stationList.map((st) => (
+                <option key={st.id} value={st.id}>
+                  {st.name} ({st.type === 'CORS' ? 'CORS Sabit' : 'Rover Nokta'})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-4 text-[11px] text-slate-500">
+            <span>Toplam {stationList.length} Nokta</span>
+            <span>•</span>
+            <span>{baselines.length} Baz Vektörü</span>
+            <span>•</span>
+            <span>Yerel Saat: {timeZone}</span>
           </div>
         </div>
       </div>
 
-      {/* DOP Metrics Strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <div className="p-3.5 rounded-xl bg-white border border-slate-200 shadow-2xs">
-          <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">GÖRÜNÜR UYDU</span>
-          <div className="text-xl font-black text-slate-900 flex items-center gap-1.5 mt-0.5">
-            <Satellite className="w-4 h-4 text-sky-600" />
-            <span>{filteredTracks.length} SV</span>
-          </div>
-          <span className="text-[10px] text-emerald-600 font-semibold">Tüm takımyıldızlar</span>
+      {/* WINDOW VIEW MODE 1: SPLIT VIEW (CAD MAP + OCCUPATION VIEW SIMULTANEOUSLY) */}
+      {windowMode === 'split' && (
+        <div className="space-y-4 animate-in fade-in">
+          {/* Top Window: Topcon CAD Map View */}
+          <TopconCadMapViewer
+            stations={stations}
+            baselines={baselines}
+            selectedStationId={activeStationId}
+            onSelectStation={handleSelectStationInternal}
+            className="w-full"
+          />
+
+          {/* Bottom Window: Topcon Occupation View */}
+          <TopconOccupationViewer
+            stations={stations}
+            timeZone={timeZone}
+            selectedStationId={activeStationId}
+            onSelectStation={handleSelectStationInternal}
+            className="w-full"
+          />
         </div>
+      )}
 
-        <div className="p-3.5 rounded-xl bg-white border border-slate-200 shadow-2xs">
-          <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">PDOP (3D KONUM)</span>
-          <div className="text-xl font-black text-slate-900 mt-0.5">
-            {dopMetrics.pdop}
-          </div>
-          <span className="text-[10px] text-emerald-600 font-semibold">
-            {dopMetrics.pdop <= 2.0 ? 'Mükemmel Geometri' : 'İyi Geometri'}
-          </span>
+      {/* WINDOW VIEW MODE 2: OCCUPATION VIEW FULL WINDOW */}
+      {windowMode === 'occupation' && (
+        <div className="space-y-3 animate-in fade-in">
+          <TopconOccupationViewer
+            stations={stations}
+            timeZone={timeZone}
+            selectedStationId={activeStationId}
+            onSelectStation={handleSelectStationInternal}
+            className="w-full shadow-md"
+          />
         </div>
+      )}
 
-        <div className="p-3.5 rounded-xl bg-white border border-slate-200 shadow-2xs">
-          <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">GDOP (GEOMETRİK)</span>
-          <div className="text-xl font-black text-slate-900 mt-0.5">
-            {dopMetrics.gdop}
-          </div>
-          <span className="text-[10px] text-slate-500 font-semibold">Saat ve 3D Dağılım</span>
+      {/* WINDOW VIEW MODE 3: CAD MAP VIEW FULL WINDOW */}
+      {windowMode === 'cad_map' && (
+        <div className="space-y-3 animate-in fade-in">
+          <TopconCadMapViewer
+            stations={stations}
+            baselines={baselines}
+            selectedStationId={activeStationId}
+            onSelectStation={handleSelectStationInternal}
+            className="w-full shadow-md"
+          />
         </div>
+      )}
 
-        <div className="p-3.5 rounded-xl bg-white border border-slate-200 shadow-2xs">
-          <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">HDOP (YATAY)</span>
-          <div className="text-xl font-black text-slate-900 mt-0.5">
-            {dopMetrics.hdop}
-          </div>
-          <span className="text-[10px] text-slate-500 font-semibold">Enlem &amp; Boylam</span>
-        </div>
-
-        <div className="p-3.5 rounded-xl bg-white border border-slate-200 shadow-2xs">
-          <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">VDOP (DÜŞEY)</span>
-          <div className="text-xl font-black text-slate-900 mt-0.5">
-            {dopMetrics.vdop}
-          </div>
-          <span className="text-[10px] text-slate-500 font-semibold">Elipsoit Yükseklik</span>
-        </div>
-
-        <div className="p-3.5 rounded-xl bg-white border border-slate-200 shadow-2xs">
-          <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">MASKE AÇISI</span>
-          <div className="text-xl font-black text-indigo-700 mt-0.5">
-            {maskAngle}°
-          </div>
-          <span className="text-[10px] text-indigo-600 font-semibold">BÖHYY standardı</span>
-        </div>
-      </div>
-
-      {/* Main Grid: Polar Skyplot (Left) + Quality Details & Controls (Right) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        
-        {/* Left Panel: Polar Skyplot (7 cols) */}
-        <div className="lg:col-span-7 bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col items-center justify-between">
-          
-          {/* Skyplot Header Controls */}
-          <div className="w-full flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4">
-            <div className="flex items-center gap-2">
-              <Compass className="w-4 h-4 text-sky-600" />
-              <h3 className="text-sm font-bold text-slate-900">
-                Kutupsal Gökyüzü Diyagramı (Polar Skyplot)
-              </h3>
-            </div>
-
-            {/* View Mode Toggle */}
-            <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl text-xs">
-              <button
-                onClick={() => setActiveTab('skyplot')}
-                className={`px-3 py-1 rounded-lg font-bold transition ${
-                  activeTab === 'skyplot' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                Kutupsal Harita
-              </button>
-              <button
-                onClick={() => setActiveTab('snr')}
-                className={`px-3 py-1 rounded-lg font-bold transition ${
-                  activeTab === 'snr' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                SNR Zaman Serisi
-              </button>
-            </div>
-          </div>
-
-          {/* Interactive Polar SVG */}
-          {activeTab === 'skyplot' && (
-            <div className="relative py-4 flex items-center justify-center">
-              <svg width="400" height="400" viewBox="0 0 400 400" className="max-w-full drop-shadow-xs select-none">
-                <defs>
-                  {/* Mask Zone Radial Gradient */}
-                  <radialGradient id="skyGradient" cx="50%" cy="50%" r="50%">
-                    <stop offset="0%" stopColor="#f8fafc" />
-                    <stop offset="70%" stopColor="#f1f5f9" />
-                    <stop offset="100%" stopColor="#e2e8f0" />
-                  </radialGradient>
-                  <radialGradient id="maskGradient" cx="50%" cy="50%" r="50%">
-                    <stop offset="0%" stopColor="transparent" />
-                    <stop offset="80%" stopColor="rgba(244, 63, 94, 0.03)" />
-                    <stop offset="100%" stopColor="rgba(244, 63, 94, 0.15)" />
-                  </radialGradient>
-                </defs>
-
-                {/* Sky Base Circle */}
-                <circle cx={center} cy={center} r={radius} fill="url(#skyGradient)" stroke="#94a3b8" strokeWidth="1.5" />
-
-                {/* Elevation Rings: 0° (radius), 15°, 30°, 60°, 90° (center) */}
-                <circle cx={center} cy={center} r={radius * ((90 - 15) / 90)} fill="none" stroke="#cbd5e1" strokeDasharray="3 3" />
-                <circle cx={center} cy={center} r={radius * ((90 - 30) / 90)} fill="none" stroke="#cbd5e1" strokeDasharray="3 3" />
-                <circle cx={center} cy={center} r={radius * ((90 - 60) / 90)} fill="none" stroke="#cbd5e1" strokeDasharray="3 3" />
-
-                {/* Red Shaded Mask Elevation Ring */}
-                <circle
-                  cx={center}
-                  cy={center}
-                  r={maskRadius}
-                  fill="url(#maskGradient)"
-                  stroke="#f43f5e"
-                  strokeWidth="1.5"
-                  strokeDasharray="4 2"
-                />
-
-                {/* Center Zenith Point */}
-                <circle cx={center} cy={center} r="3" fill="#64748b" />
-                <text x={center + 6} y={center - 6} fontSize="9" fill="#94a3b8" fontWeight="600">Zenith 90°</text>
-
-                {/* Crosshairs: North-South, East-West */}
-                <line x1={center} y1={center - radius} x2={center} y2={center + radius} stroke="#cbd5e1" strokeWidth="1" />
-                <line x1={center - radius} y1={center} x2={center + radius} y2={center} stroke="#cbd5e1" strokeWidth="1" />
-
-                {/* Diagonal lines (45°, 135°, 225°, 315°) */}
-                <line x1={center - radius * 0.707} y1={center - radius * 0.707} x2={center + radius * 0.707} y2={center + radius * 0.707} stroke="#e2e8f0" strokeDasharray="2 4" />
-                <line x1={center - radius * 0.707} y1={center + radius * 0.707} x2={center + radius * 0.707} y2={center - radius * 0.707} stroke="#e2e8f0" strokeDasharray="2 4" />
-
-                {/* Cardinal Direction Labels */}
-                <text x={center} y={center - radius - 10} textAnchor="middle" fontSize="12" fontWeight="bold" fill="#0f172a">K (0°)</text>
-                <text x={center + radius + 14} y={center + 4} textAnchor="start" fontSize="12" fontWeight="bold" fill="#0f172a">D (90°)</text>
-                <text x={center} y={center + radius + 18} textAnchor="middle" fontSize="12" fontWeight="bold" fill="#0f172a">G (180°)</text>
-                <text x={center - radius - 14} y={center + 4} textAnchor="end" fontSize="12" fontWeight="bold" fill="#0f172a">B (270°)</text>
-
-                {/* Elevation Ring Degree Labels */}
-                <text x={center + 4} y={center - radius * ((90 - 30) / 90) - 2} fontSize="8" fill="#94a3b8">30°</text>
-                <text x={center + 4} y={center - radius * ((90 - 60) / 90) - 2} fontSize="8" fill="#94a3b8">60°</text>
-                <text x={center + 4} y={center - maskRadius - 2} fontSize="8" fill="#f43f5e" fontWeight="bold">{maskAngle}° Maske</text>
-
-                {/* Satellite Sky Tracks (Orbits) */}
-                {filteredTracks.map((track) => {
-                  const style = getConstellationStyle(track.system);
-                  const isHovered = hoveredSatId === track.satId;
-                  const isSelected = selectedSatId === track.satId;
-
-                  // Build SVG path data for satellite trajectory
-                  const pathData = track.points
-                    .map((p, idx) => {
-                      const { x, y } = polarToCartesian(p.azimuthDeg, p.elevationDeg, radius, center);
-                      return `${idx === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
-                    })
-                    .join(' ');
-
-                  // Representative midpoint point for PRN label
-                  const midPoint = track.points[Math.floor(track.points.length / 2)] || track.points[0];
-                  const { x: labelX, y: labelY } = polarToCartesian(midPoint.azimuthDeg, midPoint.elevationDeg, radius, center);
-
-                  return (
-                    <g
-                      key={track.satId}
-                      className="cursor-pointer transition-opacity"
-                      onMouseEnter={() => setHoveredSatId(track.satId)}
-                      onMouseLeave={() => setHoveredSatId(null)}
-                      onClick={() => setSelectedSatId(selectedSatId === track.satId ? null : track.satId)}
-                      opacity={selectedSatId && !isSelected ? 0.25 : 1}
-                    >
-                      {/* Trajectory Arc */}
-                      <path
-                        d={pathData}
-                        fill="none"
-                        stroke={style.stroke}
-                        strokeWidth={isHovered || isSelected ? 3.5 : 2}
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        className="transition-all"
-                      />
-
-                      {/* Trajectory Dots */}
-                      {track.points.filter((_, i) => i % 6 === 0).map((pt, pIdx) => {
-                        const { x: px, y: py } = polarToCartesian(pt.azimuthDeg, pt.elevationDeg, radius, center);
-                        return (
-                          <circle
-                            key={pIdx}
-                            cx={px}
-                            cy={py}
-                            r={pt.isMasked ? 1.5 : 2.5}
-                            fill={pt.isMasked ? '#f43f5e' : style.fill}
-                          />
-                        );
-                      })}
-
-                      {/* PRN Badge at Midpoint */}
-                      <g transform={`translate(${labelX}, ${labelY})`}>
-                        <circle
-                          r={isHovered || isSelected ? 12 : 9}
-                          fill={isHovered || isSelected ? '#0f172a' : style.fill}
-                          stroke="#ffffff"
-                          strokeWidth="1.5"
-                          className="transition-all"
-                        />
-                        <text
-                          y={3}
-                          textAnchor="middle"
-                          fontSize={isHovered || isSelected ? 9 : 8}
-                          fontWeight="bold"
-                          fill="#ffffff"
-                        >
-                          {track.satId}
-                        </text>
-                      </g>
-                    </g>
-                  );
-                })}
-              </svg>
-            </div>
-          )}
-
-          {/* SNR Line Chart View */}
-          {activeTab === 'snr' && (
-            <div className="w-full py-4 space-y-4">
-              <div className="flex items-center justify-between text-xs text-slate-500">
-                <span>Zaman Serisi boyunca Sinyal Gücü (SNR, dB-Hz)</span>
-                <span className="font-semibold text-slate-700">İdeal: &gt; 35 dB-Hz</span>
+      {/* WINDOW VIEW MODE 4 & 5: SKYPLOT & SNR ANALYSIS */}
+      {(windowMode === 'skyplot' || windowMode === 'snr') && (
+        <div className="space-y-4 animate-in fade-in">
+          {/* DOP Metrics Strip */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            <div className="p-3.5 rounded-xl bg-white border border-slate-200 shadow-2xs">
+              <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">GÖRÜNÜR UYDU</span>
+              <div className="text-xl font-black text-slate-900 flex items-center gap-1.5 mt-0.5">
+                <Satellite className="w-4 h-4 text-sky-600" />
+                <span>{filteredTracks.length} SV</span>
               </div>
+              <span className="text-[10px] text-emerald-600 font-semibold">Tüm takımyıldızlar</span>
+            </div>
 
-              <div className="h-64 w-full bg-slate-50 rounded-xl border border-slate-200 p-3 relative flex items-end gap-1 overflow-x-auto">
-                {/* 35 dB-Hz Guideline */}
-                <div className="absolute left-0 right-0 top-[40%] border-b border-dashed border-emerald-400 pointer-events-none flex items-center justify-end px-2">
-                  <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 px-1 rounded">35 dB-Hz Eşik</span>
+            <div className="p-3.5 rounded-xl bg-white border border-slate-200 shadow-2xs">
+              <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">PDOP (3D KONUM)</span>
+              <div className="text-xl font-black text-slate-900 mt-0.5">
+                {dopMetrics.pdop}
+              </div>
+              <span className="text-[10px] text-emerald-600 font-semibold">
+                {dopMetrics.pdop <= 2.0 ? 'Mükemmel Geometri' : 'İyi Geometri'}
+              </span>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-white border border-slate-200 shadow-2xs">
+              <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">GDOP (GEOMETRİK)</span>
+              <div className="text-xl font-black text-slate-900 mt-0.5">
+                {dopMetrics.gdop}
+              </div>
+              <span className="text-[10px] text-slate-500 font-semibold">Saat ve 3D Dağılım</span>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-white border border-slate-200 shadow-2xs">
+              <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">HDOP (YATAY)</span>
+              <div className="text-xl font-black text-slate-900 mt-0.5">
+                {dopMetrics.hdop}
+              </div>
+              <span className="text-[10px] text-slate-500 font-semibold">Enlem &amp; Boylam</span>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-white border border-slate-200 shadow-2xs">
+              <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">VDOP (DÜŞEY)</span>
+              <div className="text-xl font-black text-slate-900 mt-0.5">
+                {dopMetrics.vdop}
+              </div>
+              <span className="text-[10px] text-slate-500 font-semibold">Elipsoit Yükseklik</span>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-white border border-slate-200 shadow-2xs">
+              <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">MASKE AÇISI</span>
+              <div className="text-xl font-black text-indigo-700 mt-0.5">
+                {maskAngle}°
+              </div>
+              <span className="text-[10px] text-indigo-600 font-semibold">BÖHYY standardı</span>
+            </div>
+          </div>
+
+          {/* Main Grid: Skyplot or SNR on left (7 cols), Analytics on right (5 cols) */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+            
+            {/* Left Panel */}
+            <div className="lg:col-span-7 bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col items-center justify-between">
+              
+              <div className="w-full flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4">
+                <div className="flex items-center gap-2">
+                  <Compass className="w-4 h-4 text-sky-600" />
+                  <h3 className="text-sm font-bold text-slate-900">
+                    {windowMode === 'skyplot' ? 'Kutupsal Gökyüzü Diyagramı (Polar Skyplot)' : 'Sinyal / SNR Zaman Serisi'}
+                  </h3>
                 </div>
 
-                {filteredTracks.map((sat) => {
-                  const style = getConstellationStyle(sat.system);
-                  const isHovered = hoveredSatId === sat.satId;
-                  const isSelected = selectedSatId === sat.satId;
-                  const heightPercent = Math.min(100, Math.max(10, ((sat.avgSnr - 20) / 40) * 100));
+                <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl text-xs">
+                  <button
+                    onClick={() => setWindowMode('skyplot')}
+                    className={`px-3 py-1 rounded-lg font-bold transition ${
+                      windowMode === 'skyplot' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    Kutupsal Harita
+                  </button>
+                  <button
+                    onClick={() => setWindowMode('snr')}
+                    className={`px-3 py-1 rounded-lg font-bold transition ${
+                      windowMode === 'snr' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    SNR Zaman Serisi
+                  </button>
+                </div>
+              </div>
 
-                  return (
-                    <div
-                      key={sat.satId}
-                      onMouseEnter={() => setHoveredSatId(sat.satId)}
-                      onMouseLeave={() => setHoveredSatId(null)}
-                      onClick={() => setSelectedSatId(selectedSatId === sat.satId ? null : sat.satId)}
-                      className="flex-1 min-w-[20px] flex flex-col items-center justify-end h-full cursor-pointer group"
-                      title={`${sat.satId} (${sat.system}): Ort. SNR = ${sat.avgSnr} dB-Hz, Maks Yükseklik = ${sat.maxElevation}°`}
+              {/* Polar SVG */}
+              {windowMode === 'skyplot' && (
+                <div className="relative py-4 flex items-center justify-center">
+                  <svg width="400" height="400" viewBox="0 0 400 400" className="max-w-full drop-shadow-xs select-none">
+                    <defs>
+                      <radialGradient id="skyGradient" cx="50%" cy="50%" r="50%">
+                        <stop offset="0%" stopColor="#f8fafc" />
+                        <stop offset="70%" stopColor="#f1f5f9" />
+                        <stop offset="100%" stopColor="#e2e8f0" />
+                      </radialGradient>
+                      <radialGradient id="maskGradient" cx="50%" cy="50%" r="50%">
+                        <stop offset="0%" stopColor="transparent" />
+                        <stop offset="80%" stopColor="rgba(244, 63, 94, 0.03)" />
+                        <stop offset="100%" stopColor="rgba(244, 63, 94, 0.15)" />
+                      </radialGradient>
+                    </defs>
+
+                    <circle cx={center} cy={center} r={radius} fill="url(#skyGradient)" stroke="#94a3b8" strokeWidth="1.5" />
+                    <circle cx={center} cy={center} r={radius * ((90 - 15) / 90)} fill="none" stroke="#cbd5e1" strokeDasharray="3 3" />
+                    <circle cx={center} cy={center} r={radius * ((90 - 30) / 90)} fill="none" stroke="#cbd5e1" strokeDasharray="3 3" />
+                    <circle cx={center} cy={center} r={radius * ((90 - 60) / 90)} fill="none" stroke="#cbd5e1" strokeDasharray="3 3" />
+
+                    <circle
+                      cx={center}
+                      cy={center}
+                      r={maskRadius}
+                      fill="url(#maskGradient)"
+                      stroke="#f43f5e"
+                      strokeWidth="1.5"
+                      strokeDasharray="4 2"
+                    />
+
+                    <circle cx={center} cy={center} r="3" fill="#64748b" />
+                    <text x={center + 6} y={center - 6} fontSize="9" fill="#94a3b8" fontWeight="600">Zenith 90°</text>
+
+                    <line x1={center} y1={center - radius} x2={center} y2={center + radius} stroke="#cbd5e1" strokeWidth="1" />
+                    <line x1={center - radius} y1={center} x2={center + radius} y2={center} stroke="#cbd5e1" strokeWidth="1" />
+
+                    <text x={center} y={center - radius - 10} textAnchor="middle" fontSize="12" fontWeight="bold" fill="#0f172a">K (0°)</text>
+                    <text x={center + radius + 14} y={center + 4} textAnchor="start" fontSize="12" fontWeight="bold" fill="#0f172a">D (90°)</text>
+                    <text x={center} y={center + radius + 18} textAnchor="middle" fontSize="12" fontWeight="bold" fill="#0f172a">G (180°)</text>
+                    <text x={center - radius - 14} y={center + 4} textAnchor="end" fontSize="12" fontWeight="bold" fill="#0f172a">B (270°)</text>
+
+                    <text x={center + 4} y={center - radius * ((90 - 30) / 90) - 2} fontSize="8" fill="#94a3b8">30°</text>
+                    <text x={center + 4} y={center - radius * ((90 - 60) / 90) - 2} fontSize="8" fill="#94a3b8">60°</text>
+                    <text x={center + 4} y={center - maskRadius - 2} fontSize="8" fill="#f43f5e" fontWeight="bold">{maskAngle}° Maske</text>
+
+                    {filteredTracks.map((track) => {
+                      const style = getConstellationStyle(track.system);
+                      const isHovered = hoveredSatId === track.satId;
+                      const isSelected = selectedSatId === track.satId;
+
+                      const pathData = track.points
+                        .map((p, idx) => {
+                          const { x, y } = polarToCartesian(p.azimuthDeg, p.elevationDeg, radius, center);
+                          return `${idx === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
+                        })
+                        .join(' ');
+
+                      const midPoint = track.points[Math.floor(track.points.length / 2)] || track.points[0];
+                      const { x: labelX, y: labelY } = polarToCartesian(midPoint.azimuthDeg, midPoint.elevationDeg, radius, center);
+
+                      return (
+                        <g
+                          key={track.satId}
+                          className="cursor-pointer transition-opacity"
+                          onMouseEnter={() => setHoveredSatId(track.satId)}
+                          onMouseLeave={() => setHoveredSatId(null)}
+                          onClick={() => setSelectedSatId(selectedSatId === track.satId ? null : track.satId)}
+                          opacity={selectedSatId && !isSelected ? 0.25 : 1}
+                        >
+                          <path
+                            d={pathData}
+                            fill="none"
+                            stroke={style.stroke}
+                            strokeWidth={isHovered || isSelected ? 3.5 : 2}
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            className="transition-all"
+                          />
+
+                          {track.points.filter((_, i) => i % 6 === 0).map((pt, pIdx) => {
+                            const { x: px, y: py } = polarToCartesian(pt.azimuthDeg, pt.elevationDeg, radius, center);
+                            return (
+                              <circle
+                                key={pIdx}
+                                cx={px}
+                                cy={py}
+                                r={pt.isMasked ? 1.5 : 2.5}
+                                fill={pt.isMasked ? '#f43f5e' : style.fill}
+                              />
+                            );
+                          })}
+
+                          <g transform={`translate(${labelX}, ${labelY})`}>
+                            <circle
+                              r={isHovered || isSelected ? 12 : 9}
+                              fill={isHovered || isSelected ? '#0f172a' : style.fill}
+                              stroke="#ffffff"
+                              strokeWidth="1.5"
+                              className="transition-all"
+                            />
+                            <text
+                              y={3}
+                              textAnchor="middle"
+                              fontSize="8"
+                              fontWeight="bold"
+                              fill="#ffffff"
+                              fontFamily="monospace"
+                            >
+                              {track.satId}
+                            </text>
+                          </g>
+                        </g>
+                      );
+                    })}
+                  </svg>
+                </div>
+              )}
+
+              {/* SNR View */}
+              {windowMode === 'snr' && (
+                <div className="w-full py-4 space-y-4">
+                  <div className="text-xs text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                    <span className="font-bold text-slate-800">Sinyal-Gürültü Oranı (SNR) Dağılımı:</span>
+                    <p className="mt-0.5 text-slate-500">
+                      RTKLIB ve BÖHYY standartlarında 35 dB-Hz altındaki sinyaller çok yolluluk (multipath) ve faz kayması riskini artırır.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+                    {filteredTracks.map((sat) => {
+                      const snr = sat.avgSnr;
+                      const isGood = snr >= 40;
+                      const isFair = snr >= 34 && snr < 40;
+                      return (
+                        <div
+                          key={sat.satId}
+                          onClick={() => setSelectedSatId(sat.satId)}
+                          className={`p-2 rounded-xl border text-center cursor-pointer transition ${
+                            selectedSatId === sat.satId
+                              ? 'border-sky-500 bg-sky-50 shadow-xs'
+                              : 'border-slate-200 bg-white hover:bg-slate-50'
+                          }`}
+                        >
+                          <span className="text-[11px] font-bold font-mono text-slate-800 block">{sat.satId}</span>
+                          <span className={`text-xs font-black block mt-0.5 ${
+                            isGood ? 'text-emerald-600' : isFair ? 'text-amber-600' : 'text-rose-600'
+                          }`}>
+                            {snr} dB
+                          </span>
+                          <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden mt-1.5">
+                            <div
+                              className={`h-full ${
+                                isGood ? 'bg-emerald-500' : isFair ? 'bg-amber-500' : 'bg-rose-500'
+                              }`}
+                              style={{ width: `${Math.min(100, (snr / 55) * 100)}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Mask Angle Slider & Legend */}
+              <div className="w-full pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-4 text-xs">
+                <div className="flex items-center gap-3">
+                  <span className="font-semibold text-slate-700 flex items-center gap-1.5">
+                    <Sliders className="w-3.5 h-3.5 text-slate-400" />
+                    Yükseklik Maskesi:
+                  </span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="30"
+                    step="1"
+                    value={maskAngle}
+                    onChange={(e) => setMaskAngle(parseInt(e.target.value, 10))}
+                    className="w-28 accent-sky-600 cursor-pointer"
+                  />
+                  <span className="font-bold text-sky-700">{maskAngle}°</span>
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="flex items-center gap-1 text-[11px] font-medium text-slate-600">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> GPS
+                  </span>
+                  <span className="flex items-center gap-1 text-[11px] font-medium text-slate-600">
+                    <span className="w-2.5 h-2.5 rounded-full bg-rose-500" /> GLONASS
+                  </span>
+                  <span className="flex items-center gap-1 text-[11px] font-medium text-slate-600">
+                    <span className="w-2.5 h-2.5 rounded-full bg-sky-500" /> Galileo
+                  </span>
+                  <span className="flex items-center gap-1 text-[11px] font-medium text-slate-600">
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500" /> BeiDou
+                  </span>
+                </div>
+              </div>
+
+            </div>
+
+            {/* Right Panel: Analytics & Selected Satellite */}
+            <div className="lg:col-span-5 space-y-4">
+              
+              {/* Constellation Filter */}
+              <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                    <Filter className="w-3.5 h-3.5 text-sky-600" />
+                    Takımyıldızı Filtresi
+                  </span>
+                  <span className="text-[11px] font-semibold text-slate-500">
+                    {filteredTracks.length} / {allSatTracks.length} Uydu
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
+                  {['ALL', 'GPS', 'GLONASS', 'Galileo', 'BeiDou'].map((sys) => (
+                    <button
+                      key={sys}
+                      onClick={() => setSelectedSystem(sys)}
+                      className={`py-1.5 px-2 rounded-xl text-xs font-bold transition text-center ${
+                        selectedSystem === sys
+                          ? 'bg-slate-900 text-white shadow-xs'
+                          : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200'
+                      }`}
                     >
-                      <div
-                        style={{ height: `${heightPercent}%` }}
-                        className={`w-full rounded-t transition-all ${
-                          isSelected || isHovered ? 'bg-slate-900 shadow-md ring-2 ring-sky-400' : style.bg
-                        }`}
-                      />
-                      <span className="text-[9px] font-mono font-bold mt-1 text-slate-700 truncate w-full text-center">
-                        {sat.satId}
+                      {sys === 'ALL' ? 'Tümü' : sys}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Selected Satellite Card */}
+              {activeTrack && (
+                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm text-white ${
+                        getConstellationStyle(activeTrack.system).bg
+                      }`}>
+                        {activeTrack.satId}
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-extrabold text-slate-900">
+                          {activeTrack.system} Uydu {activeTrack.prn}
+                        </h4>
+                        <span className="text-[10px] text-slate-400">
+                          {selectedSatId === activeTrack.satId ? 'Seçili Uydu' : 'Odaklanan Uydu'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                      getConstellationStyle(activeTrack.system).badge
+                    }`}>
+                      {activeTrack.system}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                      <span className="text-[10px] text-slate-400 block font-semibold">MAKSİMUM YÜKSEKLİK</span>
+                      <span className="text-base font-extrabold text-slate-900">{activeTrack.maxElevation}°</span>
+                      <span className="text-[10px] text-slate-500 block">Zenith Yaklaşımı</span>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                      <span className="text-[10px] text-slate-400 block font-semibold">ORTALAMA SNR</span>
+                      <span className="text-base font-extrabold text-emerald-700">{activeTrack.avgSnr} dB-Hz</span>
+                      <span className="text-[10px] text-slate-500 block">Sinyal Kalitesi</span>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                      <span className="text-[10px] text-slate-400 block font-semibold">GEÇERLİ EPOKLAR</span>
+                      <span className="text-base font-extrabold text-slate-900">{activeTrack.validEpochs} / {activeTrack.totalEpochs}</span>
+                      <span className="text-[10px] text-slate-500 block">Maske Üstü</span>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                      <span className="text-[10px] text-slate-400 block font-semibold">ÇOK YOLLULUK (MULTIPATH)</span>
+                      <span className={`text-base font-extrabold ${
+                        activeTrack.multipathIndex > 0.4 ? 'text-amber-600' : 'text-emerald-700'
+                      }`}>
+                        {(activeTrack.multipathIndex * 100).toFixed(0)}%
+                      </span>
+                      <span className="text-[10px] text-slate-500 block">
+                        {activeTrack.multipathIndex > 0.4 ? 'Orta Düzey Yansıma' : 'Temiz Sinyal'}
                       </span>
                     </div>
-                  );
-                })}
-              </div>
-
-              <div className="flex items-center justify-between text-[11px] text-slate-500">
-                <span>Düşük SNR (&lt; 30 dB-Hz): Binalar, ağaçlar veya çok yolluluk (multipath) kaynaklı sinyal kaybı.</span>
-                <span className="font-bold text-slate-700">{filteredTracks.length} Uydu Listelendi</span>
-              </div>
-            </div>
-          )}
-
-          {/* Mask Angle Slider & Legend */}
-          <div className="w-full pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-4 text-xs">
-            <div className="flex items-center gap-3">
-              <span className="font-semibold text-slate-700 flex items-center gap-1.5">
-                <Sliders className="w-3.5 h-3.5 text-slate-400" />
-                Yükseklik Maskesi:
-              </span>
-              <input
-                type="range"
-                min="0"
-                max="30"
-                step="1"
-                value={maskAngle}
-                onChange={(e) => setMaskAngle(parseInt(e.target.value, 10))}
-                className="w-28 accent-sky-600 cursor-pointer"
-              />
-              <span className="font-bold text-sky-700">{maskAngle}°</span>
-            </div>
-
-            {/* Constellation Legend Badges */}
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="flex items-center gap-1 text-[11px] font-medium text-slate-600">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> GPS
-              </span>
-              <span className="flex items-center gap-1 text-[11px] font-medium text-slate-600">
-                <span className="w-2.5 h-2.5 rounded-full bg-rose-500" /> GLONASS
-              </span>
-              <span className="flex items-center gap-1 text-[11px] font-medium text-slate-600">
-                <span className="w-2.5 h-2.5 rounded-full bg-sky-500" /> Galileo
-              </span>
-              <span className="flex items-center gap-1 text-[11px] font-medium text-slate-600">
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-500" /> BeiDou
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Right Panel: QC Analytics, Constellation Filters & Selected Satellite Details (5 cols) */}
-        <div className="lg:col-span-5 space-y-4">
-          
-          {/* Constellation Filter Buttons */}
-          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                <Filter className="w-3.5 h-3.5 text-sky-600" />
-                Takımyıldızı Filtresi
-              </span>
-              <span className="text-[11px] font-semibold text-slate-500">
-                {filteredTracks.length} / {allSatTracks.length} Uydu
-              </span>
-            </div>
-
-            <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
-              {['ALL', 'GPS', 'GLONASS', 'Galileo', 'BeiDou'].map((sys) => (
-                <button
-                  key={sys}
-                  onClick={() => setSelectedSystem(sys)}
-                  className={`py-1.5 px-2 rounded-xl text-xs font-bold transition text-center ${
-                    selectedSystem === sys
-                      ? 'bg-slate-900 text-white shadow-xs'
-                      : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200'
-                  }`}
-                >
-                  {sys === 'ALL' ? 'Tümü' : sys}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Selected Satellite Card */}
-          {activeTrack && (
-            <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                <div className="flex items-center gap-2.5">
-                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm text-white ${
-                    getConstellationStyle(activeTrack.system).bg
-                  }`}>
-                    {activeTrack.satId}
                   </div>
-                  <div>
-                    <h4 className="text-sm font-extrabold text-slate-900">
-                      {activeTrack.system} Uydu {activeTrack.prn}
-                    </h4>
-                    <span className="text-[10px] text-slate-400">
-                      {selectedSatId === activeTrack.satId ? 'Seçili Uydu' : 'Odaklanan Uydu'}
+                </div>
+              )}
+
+              {/* Station Overview Card */}
+              <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-3">
+                <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-sky-600" />
+                  İstasyon Bilgileri ({currentStation.name})
+                </h4>
+
+                <div className="space-y-2 text-xs">
+                  <div className="flex justify-between py-1 border-b border-slate-100">
+                    <span className="text-slate-500">Nokta Türü:</span>
+                    <span className="font-semibold text-slate-800">
+                      {currentStation.type === 'CORS' ? 'CORS Sabit Dayanak' : 'Ara / Poligon Noktası'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-100">
+                    <span className="text-slate-500">Koordinat (Y / Sağa):</span>
+                    <span className="font-mono font-bold text-slate-800">
+                      {(currentStation.projY ?? 0).toFixed(3)} m
+                    </span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-100">
+                    <span className="text-slate-500">Koordinat (X / Yukarı):</span>
+                    <span className="font-mono font-bold text-slate-800">
+                      {(currentStation.projX ?? 0).toFixed(3)} m
+                    </span>
+                  </div>
+                  <div className="flex justify-between py-1">
+                    <span className="text-slate-500">Anten:</span>
+                    <span className="font-mono font-bold text-sky-700 truncate max-w-[180px]">
+                      {currentStation.antenna?.model || 'TRM59800.00 NONE'} ({currentStation.antenna.measuredHeight.toFixed(3)} m)
                     </span>
                   </div>
                 </div>
-
-                <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
-                  getConstellationStyle(activeTrack.system).badge
-                }`}>
-                  {activeTrack.system}
-                </span>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 text-xs">
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
-                  <span className="text-[10px] text-slate-400 block font-semibold">MAKSİMUM YÜKSEKLİK</span>
-                  <span className="text-base font-extrabold text-slate-900">{activeTrack.maxElevation}°</span>
-                  <span className="text-[10px] text-slate-500 block">Zenith Yaklaşımı</span>
-                </div>
-
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
-                  <span className="text-[10px] text-slate-400 block font-semibold">ORTALAMA SNR</span>
-                  <span className="text-base font-extrabold text-emerald-700">{activeTrack.avgSnr} dB-Hz</span>
-                  <span className="text-[10px] text-slate-500 block">Sinyal Kalitesi</span>
-                </div>
-
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
-                  <span className="text-[10px] text-slate-400 block font-semibold">GEÇERLİ EPOKLAR</span>
-                  <span className="text-base font-extrabold text-slate-900">{activeTrack.validEpochs} / {activeTrack.totalEpochs}</span>
-                  <span className="text-[10px] text-slate-500 block">Maske Üstü</span>
-                </div>
-
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
-                  <span className="text-[10px] text-slate-400 block font-semibold">ÇOK YOLLULUK (MULTIPATH)</span>
-                  <span className={`text-base font-extrabold ${
-                    activeTrack.multipathIndex > 0.4 ? 'text-amber-600' : 'text-emerald-700'
-                  }`}>
-                    {(activeTrack.multipathIndex * 100).toFixed(0)}%
-                  </span>
-                  <span className="text-[10px] text-slate-500 block">
-                    {activeTrack.multipathIndex > 0.4 ? 'Orta Düzey Yansıma' : 'Temiz Sinyal'}
-                  </span>
-                </div>
-              </div>
-
-              {activeTrack.cycleSlips > 0 && (
-                <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-                  <span>Düşük yükseklikte {activeTrack.cycleSlips} çevrim kayması (cycle slip) tespit edildi.</span>
-                </div>
-              )}
             </div>
-          )}
 
-          {/* Session Overview Card */}
-          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-3">
-            <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-              <Calendar className="w-3.5 h-3.5 text-sky-600" />
-              Oturum Özet Bilgileri
-            </h4>
-
-            <div className="space-y-2 text-xs">
-              <div className="flex justify-between py-1 border-b border-slate-100">
-                <span className="text-slate-500">İlk Gözlem:</span>
-                <span className="font-mono font-bold text-slate-800">
-                  {occupation?.firstEpochDate || currentStation.observationDateStr || '2025-06-15 08:00 GPS'}
-                </span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-slate-100">
-                <span className="text-slate-500">Son Gözlem:</span>
-                <span className="font-mono font-bold text-slate-800">
-                  {occupation?.lastEpochDate || '2025-06-15 12:00 GPS'}
-                </span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-slate-100">
-                <span className="text-slate-500">Örnekleme Aralığı:</span>
-                <span className="font-mono font-bold text-slate-800">
-                  {occupation?.intervalSeconds || 30} saniye
-                </span>
-              </div>
-              <div className="flex justify-between py-1">
-                <span className="text-slate-500">Anten Yüksekliği:</span>
-                <span className="font-mono font-bold text-sky-700">
-                  {currentStation.antenna.measuredHeight.toFixed(3)} m ({currentStation.antenna.heightType === 'vertical' ? 'Düşey' : 'Eğik'})
-                </span>
-              </div>
-            </div>
           </div>
-
         </div>
+      )}
 
-      </div>
     </div>
   );
 };

@@ -50,7 +50,6 @@ interface Props {
   onDeleteBaseline: (id: string) => void;
   onRunRtklibSimulation: () => void;
   onGenerateBaselines?: () => void;
-  onSolveAllBaselinesAndAdjust?: () => void;
   onUploadNavFile?: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onUploadAtxFile?: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onNavigateTab?: (tab: string) => void;
@@ -67,7 +66,6 @@ export const BaselinesTab: React.FC<Props> = ({
   onDeleteBaseline,
   onRunRtklibSimulation,
   onGenerateBaselines,
-  onSolveAllBaselinesAndAdjust,
   onUploadNavFile,
   onUploadAtxFile,
   onNavigateTab,
@@ -256,46 +254,6 @@ export const BaselinesTab: React.FC<Props> = ({
               >
                 <Share2 className="w-3.5 h-3.5 text-slate-500" />
                 <span>Ağ Topolojisi</span>
-              </button>
-            )}
-
-            {onSolveAllBaselinesAndAdjust && stationCount >= 2 && (
-              <button
-                onClick={() => {
-                  if (isSolveBlocked) {
-                    alert(`Baz çözümü engellendi: ${uncalibratedStations.map(s => s.name).join(', ')} istasyonunun ANTEX anten kalibrasyonu eksiktir! Lütfen önce ATX dosyasını yükleyin.`);
-                    return;
-                  }
-                  onSolveAllBaselinesAndAdjust();
-                }}
-                disabled={isWorkerProcessing || isSolveBlocked}
-                className={`px-4 py-2 text-xs font-bold rounded-xl shadow-sm transition flex items-center gap-2 ${
-                  isSolveBlocked
-                    ? 'bg-rose-100 text-rose-500 border border-rose-300 cursor-not-allowed opacity-75'
-                    : 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer disabled:opacity-50'
-                }`}
-                title={
-                  isSolveBlocked
-                    ? `Baz çözümü bloke edildi: ${uncalibratedStations.map((s) => s.name).join(', ')} noktasının ANTEX kalibrasyonu eksik.`
-                    : 'Web Worker çift fark ve LAMBDA motoru ile tüm bazları çözer ve 3D Dayalı Dengelemeye aktarır'
-                }
-              >
-                {isWorkerProcessing ? (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-white" />
-                    <span>Çözülüyor ({workerProgress?.percent || 0}%)...</span>
-                  </>
-                ) : isSolveBlocked ? (
-                  <>
-                    <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
-                    <span>Çözüm Bloke Edildi (ATX Eksik)</span>
-                  </>
-                ) : (
-                  <>
-                    <Zap className="w-3.5 h-3.5 text-amber-300" />
-                    <span>Tek Tıkla Tüm Ağı Çöz &amp; Dengele</span>
-                  </>
-                )}
               </button>
             )}
           </div>

@@ -23,7 +23,7 @@ import {
   calculateCorrectedAntennaHeight,
   calculateAntennaPhaseCenterHeight,
 } from './utils/geodesy';
-import { batchProcessNetworkBaselines, batchProcessNetworkBaselinesAsync } from './utils/rtklibEngine';
+import { batchProcessNetworkBaselines } from './utils/rtklibEngine';
 import { WorkerProgressMessage } from './workers/gnssBaselineWorker';
 import { BroadcastEphemeris, parseRinexNavFile } from './utils/rinexNavParser';
 import {
@@ -443,63 +443,6 @@ export default function App() {
     e.target.value = '';
   };
 
-  const handleSolveAllBaselinesAndAdjust = async () => {
-    if (Object.keys(stations).length < 2) {
-      showToast('Baz çözümü ve dengeleme için en az 2 istasyon gereklidir.');
-      return;
-    }
-
-    const uncalibrated = getUncalibratedStations(stations);
-    if (uncalibrated.length > 0) {
-      showToast(`Baz çözümü engellendi: [${uncalibrated.map(s => s.name).join(', ')}] istasyonlarının ANTEX anten kalibrasyonu eksiktir! Lütfen İstasyonlar sekmesinden ATX dosyasını yükleyin.`);
-      setActiveTab('stations');
-      return;
-    }
-
-    setIsWorkerProcessing(true);
-    showToast('Yerli GNSS Çift Fark ve LAMBDA motoru başlatıldı...');
-
-    try {
-      const solved = await batchProcessNetworkBaselinesAsync(
-        stations,
-        {
-          ephemerisMap,
-          elevationMaskDeg: config.elevationMask,
-        },
-        (progress) => {
-          setWorkerProgress(progress);
-        }
-      );
-      setBaselines(solved);
-      const loops = calculateLoopClosures(
-        stations,
-        solved,
-        config.loopToleranceBaseMm,
-        config.loopTolerancePpm
-      );
-      setLoopClosures(loops);
-
-      // Run constrained network adjustment directly with solved carrier phase baselines
-      const res = perform3DNetworkAdjustment(stations, solved, 'constrained', config);
-      if (res) {
-        setConstrainedResult(res);
-        setAdjustmentResult(res);
-        setStations((prev) => ({
-          ...prev,
-          ...res.stations,
-        }));
-      }
-      showToast(`Tüm ağ başarıyla çözüldü! (${solved.length} baz vektörü FIX, 3D Dayalı Dengeleme tamamlandı)`);
-      setActiveTab('constrained_adjustment');
-    } catch (err: any) {
-      console.error('Batch baseline solve error:', err);
-      showToast(`Baz çözümü sırasında hata: ${err?.message || err}`);
-    } finally {
-      setIsWorkerProcessing(false);
-      setWorkerProgress(null);
-    }
-  };
-
   // Project Management Handlers
   const handleNewProject = () => {
     const newId = 'project-' + Date.now();
@@ -838,6 +781,8 @@ export default function App() {
         {activeTab === 'qc' && (
           <QcSkyplotTab
             stations={stations}
+            baselines={baselines}
+            timeZone={config.timeZone}
             elevationMask={config.elevationMask}
             selectedStationId={selectedOccupationStationId}
             onSelectStation={(id) => setSelectedOccupationStationId(id)}
@@ -855,7 +800,6 @@ export default function App() {
             onDeleteBaseline={handleDeleteBaseline}
             onRunRtklibSimulation={handleRunRtklibSimulation}
             onGenerateBaselines={handleGenerateBaselinesFromPoints}
-            onSolveAllBaselinesAndAdjust={handleSolveAllBaselinesAndAdjust}
             onUploadNavFile={handleUploadNavFile}
             onUploadAtxFile={handleGlobalAtxUpload}
             onNavigateTab={(tab) => setActiveTab(tab as TabKey)}
