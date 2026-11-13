@@ -23,24 +23,20 @@ import {
 } from 'lucide-react';
 
 interface Props {
-  mode: 'unconstrained' | 'constrained';
   adjustmentResult: AdjustmentResult | null;
   config: JobConfig;
-  onRunAdjustment: (mode: 'unconstrained' | 'constrained') => void;
+  onRunAdjustment: () => void;
   onExcludeOutliersAndReAdjust: (outlierIds: string[]) => void;
   isLoading: boolean;
 }
 
 export const AdjustmentTab: React.FC<Props> = ({
-  mode,
   adjustmentResult,
   config,
   onRunAdjustment,
   onExcludeOutliersAndReAdjust,
   isLoading,
 }) => {
-  const isFree = mode === 'unconstrained';
-
   return (
     <div className="space-y-6">
       {/* Top Controls Banner */}
@@ -48,27 +44,21 @@ export const AdjustmentTab: React.FC<Props> = ({
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <h2 className="text-base font-bold text-slate-900">
-              {isFree ? 'Serbest Ağ Dengelemesi (İç Tutarlılık)' : 'Dayalı Ağ Dengelemesi'}
+              Serbest Ağ Dengelemesi (3D Gauss-Markov İç Tutarlılık)
             </h2>
             <p className="text-xs text-slate-500 mt-1">
-              {isFree
-                ? 'Minimal kısıtla iç tutarlılık analizi ve Baarda w-testi ile kaba hata denetimi.'
-                : 'CORS sabitleri dayanak alınarak yapılan nihai 3D dengeleme.'}
+              Minimal datum kısıtıyla ağ içi geometrik tutarlılık analizi, koordinat kestirimi ve Baarda w-testi ile kaba hata denetimi.
             </p>
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
             <button
-              onClick={() => onRunAdjustment(mode)}
+              onClick={() => onRunAdjustment()}
               disabled={isLoading}
-              className={`px-4 py-2 text-xs font-bold rounded-lg shadow-sm transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50 ${
-                isFree
-                  ? 'bg-purple-700 hover:bg-purple-800 text-white'
-                  : 'bg-slate-900 hover:bg-slate-800 text-white'
-              }`}
+              className="px-4 py-2 text-xs font-bold rounded-lg shadow-sm transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50 bg-purple-700 hover:bg-purple-800 text-white"
             >
               <Play className="w-3.5 h-3.5 text-emerald-400" />
-              <span>{isFree ? 'Serbest Dengelemeyi Hesapla' : 'Dayalı Dengelemeyi Hesapla'}</span>
+              <span>Serbest Dengelemeyi Hesapla</span>
             </button>
           </div>
         </div>
@@ -155,7 +145,6 @@ export const AdjustmentTab: React.FC<Props> = ({
           <NetworkAdjustmentResultsView
             adjustmentResult={adjustmentResult}
             config={config}
-            mode={mode}
             onExcludeOutliersAndReAdjust={onExcludeOutliersAndReAdjust}
           />
         </div>
@@ -166,7 +155,7 @@ export const AdjustmentTab: React.FC<Props> = ({
           <BarChart3 className="w-10 h-10 text-slate-300 mx-auto" />
           <h3 className="text-sm font-bold text-slate-800">Henüz 3D Ağ Dengelemesi Hesaplanmadı</h3>
           <p className="text-xs text-slate-500 max-w-md mx-auto">
-            Noktalar ve baz vektörleri hazır olduğunda yukarıdaki &quot;{isFree ? 'Serbest Dengelemeyi Hesapla' : 'Dayalı Dengelemeyi Hesapla'}&quot; butonuna basarak 
+            Noktalar ve baz vektörleri hazır olduğunda yukarıdaki &quot;Serbest Dengelemeyi Hesapla&quot; butonuna basarak 
             3D Gauss-Markov dengelemesini çalıştırabilirsiniz.
           </p>
         </div>

@@ -12,7 +12,7 @@ export type CRSSystem = 'TUREF-TM30' | 'TUREF-TM27' | 'TUREF-TM33' | 'TUREF-TM36
 export type AntennaHeightType = 'vertical' | 'slant';
 export type StationType = 'CORS' | 'GROUND';
 export type SolutionStatus = 'FIX' | 'FLOAT';
-export type AdjustmentMode = 'unconstrained' | 'constrained';
+export type AdjustmentMode = 'unconstrained';
 
 export interface JobConfig {
   projectName: string;
@@ -29,8 +29,6 @@ export interface JobConfig {
   horizontalTolerance: number; // meters, default 0.03m
   verticalTolerance: number; // meters, default 0.05m
   ellipsoid: 'GRS80';
-  refEpoch: number; // 2005.00
-  surveyEpoch: number; // e.g. 2024.45
   loopToleranceBaseMm: number; // e.g. 10 mm
   loopTolerancePpm: number; // e.g. 1.0 ppm
   baardaAlpha: number; // e.g. 0.001
@@ -52,80 +50,6 @@ export interface AntennaData {
   rawRinexModel?: string; // Original unparsed model string from RINEX ANT # / TYPE
 }
 
-export interface StationVelocities {
-  vx: number; // m/year (ECEF X)
-  vy: number; // m/year (ECEF Y)
-  vz: number; // m/year (ECEF Z)
-  ve?: number; // mm/year (East)
-  vn?: number; // mm/year (North)
-  vu?: number; // mm/year (Up)
-}
-
-export interface VelocityInterpolationDetail {
-  refId: string;
-  refName: string;
-  distKm: number;
-  weight: number;
-  weightPercent: number;
-  refVx: number;
-  refVy: number;
-  refVz: number;
-  refVe: number;
-  refVn: number;
-  refVu: number;
-}
-
-export interface VelocityReportItem {
-  id: string;
-  name: string;
-  type: StationType;
-  isFixed: boolean;
-  status: 'TUSAGA Sabit' | 'TUTGA Enterpolasyon' | 'Kullanıcı Tanımlı';
-  // 2005.00 Reference epoch coordinates
-  refX: number;
-  refY: number;
-  refZ: number;
-  refLat: number;
-  refLon: number;
-  refH: number;
-  refProjY: number;
-  refProjX: number;
-  // Velocities
-  vx: number; // m/year (ECEF X)
-  vy: number; // m/year (ECEF Y)
-  vz: number; // m/year (ECEF Z)
-  ve: number; // mm/year (East)
-  vn: number; // mm/year (North)
-  vu: number; // mm/year (Up)
-  vHorizontal: number; // mm/year: sqrt(ve^2 + vn^2)
-  vAzimuthGrad: number; // Grad: atan2(ve, vn) in [0, 400)
-  vAzimuthDeg: number;  // Deg: atan2(ve, vn) in [0, 360)
-  v3D: number; // mm/year: sqrt(ve^2 + vn^2 + vu^2)
-  // Survey epoch coordinates
-  surveyEpoch: number;
-  refEpoch: number;
-  dt: number;
-  surveyX: number;
-  surveyY: number;
-  surveyZ: number;
-  surveyLat: number;
-  surveyLon: number;
-  surveyH: number;
-  surveyProjY: number;
-  surveyProjX: number;
-  // Displacements
-  dX_m: number;
-  dY_m: number;
-  dZ_m: number;
-  dX_mm: number;
-  dY_mm: number;
-  dZ_mm: number;
-  dHorizontal_cm: number;
-  dSpatial_cm: number;
-  // IDW interpolation details if estimated
-  interpolationDetails?: VelocityInterpolationDetail[];
-}
-
 export interface Station {
   id: string;
   name: string;
@@ -135,7 +59,7 @@ export interface Station {
     y: boolean;
     z: boolean;
   };
-  // ECEF Coordinates (m) at survey epoch
+  // ECEF Coordinates (m)
   x: number;
   y: number;
   z: number;
@@ -148,19 +72,6 @@ export interface Station {
   projX: number; // Yukarı Değer (Northing)
   // Antenna & setup
   antenna: AntennaData;
-  // Velocities for epoch shifting
-  velocities: StationVelocities;
-  // 2005.00 Reference Epoch Coordinates (ITRF96 official karne coordinates)
-  refX?: number; // 2005.00 ECEF X (m)
-  refY?: number; // 2005.00 ECEF Y (m)
-  refZ?: number; // 2005.00 ECEF Z (m)
-  refLat?: number;
-  refLon?: number;
-  refH?: number;
-  refProjY?: number;
-  refProjX?: number;
-  // Observation Epoch (automatically parsed from RINEX TIME OF FIRST OBS)
-  observationEpoch?: number; // e.g. 2025.45
   observationDateStr?: string; // e.g. "2025-06-15 10:30:00 GPS"
   // Detailed RINEX Occupation & Satellite tracking data for Topcon Tools Occupation View
   occupation?: RinexOccupation;
@@ -277,39 +188,6 @@ export interface AdjustmentResult {
   adjustedAt: string;
 }
 
-export interface GeoCalcPoint {
-  stationName: string;
-  sourceEpoch: number;
-  targetEpoch: number;
-  // Source coordinates
-  srcX: number;
-  srcY: number;
-  srcZ: number;
-  srcLat: number;
-  srcLon: number;
-  srcH: number;
-  srcProjY: number;
-  srcProjX: number;
-  // Velocities
-  vx: number;
-  vy: number;
-  vz: number;
-  // Target coordinates
-  dstX: number;
-  dstY: number;
-  dstZ: number;
-  dstLat: number;
-  dstLon: number;
-  dstH: number;
-  dstProjY: number;
-  dstProjX: number;
-  // Shifts
-  dX: number; // mm
-  dY: number; // mm
-  dZ: number; // mm
-  dSpatial: number; // mm
-}
-
 export type GnssConstellation = 'GPS' | 'GLONASS' | 'Galileo' | 'BeiDou' | 'QZSS' | 'SBAS';
 
 export interface SatelliteTrack {
@@ -419,7 +297,6 @@ export interface RinexHeaderMetadata {
   deltaN: number;
   firstObsTime?: string;
   lastObsTime?: string;
-  surveyEpoch?: number;
   intervalSec?: number;
   leapSeconds?: number;
   obsTypesBySystem: Record<string, string[]>;

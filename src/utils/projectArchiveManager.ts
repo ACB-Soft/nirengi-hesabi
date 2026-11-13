@@ -48,7 +48,7 @@ export interface ImportArchiveResult {
 function generateProjectSummaryText(project: SavedProject): string {
   const pData = project.data;
   const cfg = pData?.config;
-  const adj = pData?.constrainedResult || pData?.adjustmentResult || pData?.unconstrainedResult;
+  const adj = pData?.adjustmentResult || pData?.unconstrainedResult;
 
   let text = '================================================================================\n';
   text += '                    GNSS NİRENGİ AĞI VE DENGELEME RAPORU ÖZETİ\n';
@@ -59,18 +59,16 @@ function generateProjectSummaryText(project: SavedProject): string {
   text += `Proje ID            : ${project.id}\n`;
   text += `Hesaplayan          : ${cfg?.surveyor || 'Belirtilmemiş'}\n`;
   text += `Kontrol Eden        : ${cfg?.checker || 'Belirtilmemiş'}\n`;
-  text += `Kurum/Kuruluş       : ${cfg?.institution || 'ACB Maps Geodesy'}\n`;
+  text += `Kurum/Kuruluş       : ${cfg?.institution || 'BSR Maps Geodesy'}\n`;
   text += `Koordinat Sistemi   : ${cfg?.crsSystem || 'TUREF-TM30'} (DOM: ${cfg?.dom || 30}°)\n`;
   text += `Elipsoid            : ${cfg?.ellipsoid || 'GRS80'}\n`;
-  text += `Referans Epoku      : ${cfg?.refEpoch?.toFixed(2) || '2005.00'}\n`;
-  text += `Ölçü Epoku          : ${cfg?.surveyEpoch?.toFixed(2) || '2024.45'}\n`;
   text += `Oluşturulma Tarihi  : ${new Date().toLocaleString('tr-TR')}\n\n`;
 
   text += '--------------------------------------------------------------------------------\n';
   text += '1. DENGELEME VE İSTATİSTİK ÖZETİ\n';
   text += '--------------------------------------------------------------------------------\n';
   if (adj) {
-    text += `Dengeleme Türü      : ${adj.mode === 'constrained' ? '3B Dayalı Ağ Dengelemesi (Constrained)' : 'Serbest Ağ Dengelemesi (Unconstrained)'}\n`;
+    text += `Dengeleme Türü      : 3B Serbest Ağ Dengelemesi (Unconstrained)\n`;
     text += `Serbestlik Derecesi : ${adj.dof}\n`;
     text += `Toplam Ölçü Sayısı  : ${adj.totalObservations} (dX, dY, dZ)\n`;
     text += `Bilinmeyen Sayısı   : ${adj.totalUnknowns}\n`;
@@ -120,7 +118,7 @@ function generateProjectSummaryText(project: SavedProject): string {
   text += '\n';
 
   text += '================================================================================\n';
-  text += 'Bu dosya ACB Maps GNSS Ağ Dengeleme Sistemi tarafından otomatik üretilmiştir.\n';
+  text += 'Bu dosya BSR Maps GNSS Ağ Dengeleme Sistemi tarafından otomatik üretilmiştir.\n';
   text += 'Arşiv paketindeki archive_manifest.json dosyasında HMAC-SHA256 imzası mevcuttur.\n';
   text += '================================================================================\n';
 
@@ -160,13 +158,13 @@ tahrifat uyarısı verilir.
 
 GERİ YÜKLEME (RESTORE):
 -----------------------
-ACB Maps GNSS Nirengi uygulamasında "Tam Proje Arşivi Yükle (.zip)" butonuna
+BSR Maps GNSS Nirengi uygulamasında "Tam Proje Arşivi Yükle (.zip)" butonuna
 tıklayıp bu dosyayı seçtiğinizde:
 1. Tüm HMAC ve SHA-256 doğrulamaları otomatik yapılır.
 2. Proje verileri anında yüklenir.
 3. Ham RINEX dosyaları tarayıcının güvenli yerel diskine (OPFS) geri aktarılır.
 
-ACB Maps Geodesy & GNSS Systems
+BSR Maps Geodesy & GNSS Systems
 `;
 }
 
@@ -187,7 +185,7 @@ export async function exportSecureProjectZipArchive(
 
   // 1. Prepare signed project JSON payload
   const exportPayload = {
-    app: 'ACB Maps - Nirengi Hesabı',
+    app: 'BSR Maps - Nirengi Hesabı',
     version: '1.0',
     exportedAt: new Date().toISOString(),
     id: project.id,
@@ -205,9 +203,7 @@ export async function exportSecureProjectZipArchive(
       stations: project.data?.stations,
       baselines: project.data?.baselines,
       loopClosures: project.data?.loopClosures,
-      unconstrainedResult: project.data?.unconstrainedResult,
-      constrainedResult: project.data?.constrainedResult,
-      adjustmentResult: project.data?.adjustmentResult,
+      adjustmentResult: project.data?.adjustmentResult || project.data?.unconstrainedResult,
     },
   };
   const signedPayload = signBackupData(exportPayload);
@@ -314,7 +310,7 @@ export async function exportSecureProjectZipArchive(
   });
 
   const manifestData: Omit<ArchiveManifest, 'signature' | 'integrity'> = {
-    app: 'ACB Maps - Nirengi Hesabı & GNSS Arşiv Yöneticisi',
+    app: 'BSR Maps - Nirengi Hesabı & GNSS Arşiv Yöneticisi',
     version: '1.0',
     projectId: project.id,
     projectName: project.name,
@@ -428,7 +424,7 @@ export async function importSecureProjectZipArchive(
   if (!manifestDataBytes) {
     throw new Error(
       'Güvenlik Hatası: Bu ZIP arşivinde "archive_manifest.json" ve HMAC koruma imzası bulunamadı. ' +
-      'Dosya orijinal ACB Maps güvenli arşiv formatında olmayabilir.'
+      'Dosya orijinal BSR Maps güvenli arşiv formatında olmayabilir.'
     );
   }
 

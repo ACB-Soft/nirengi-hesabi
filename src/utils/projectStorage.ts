@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  * 
- * GNSS Ağ Dengeleme & Hız Hesabı Proje Depolama ve Yönetim Servisi
+ * GNSS Ağ Dengeleme Proje Depolama ve Yönetim Servisi
  */
 
 import {
@@ -29,7 +29,6 @@ export interface SavedProject {
     baselines: BaselineVector[];
     loopClosures?: LoopClosure[];
     unconstrainedResult?: AdjustmentResult | null;
-    constrainedResult?: AdjustmentResult | null;
     adjustmentResult?: AdjustmentResult | null;
   };
 }

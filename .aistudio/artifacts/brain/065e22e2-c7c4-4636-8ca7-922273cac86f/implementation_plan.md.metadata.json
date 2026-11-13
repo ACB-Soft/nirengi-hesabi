@@ -1,6 +1,0 @@
-{
-  "summary":  "Kullanıcı geri bildirimi doğrultusunda güncellenen plan: ZIP arşivinin tamamına (tüm ham RINEX dosyaları, proje JSON'u ve raporlar) kriptografik HMAC-SHA256 manifestosu ve dosya bütünlük doğrulaması eklendi. Harici değişikliklere ve tahrifatlara karşı tam koruma sağlayan mimari plana işlendi.",
-  "updatedAt":  "2026-10-25T09:58:30.468939617Z",
-  "requestFeedback":  true,
-  "userFacing":  true
-}

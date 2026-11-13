@@ -19,7 +19,6 @@ import {
   calculateLoopClosures,
   perform3DNetworkAdjustment,
   generateBaselinesFromStations,
-  runFullTopconWorkflow,
   calculateCorrectedAntennaHeight,
   calculateAntennaPhaseCenterHeight,
 } from './utils/geodesy';
@@ -38,9 +37,6 @@ import { StationsAntennaTab } from './components/StationsAntennaTab';
 import { BaselinesTab } from './components/BaselinesTab';
 import { LoopClosureTab } from './components/LoopClosureTab';
 import { AdjustmentTab } from './components/AdjustmentTab';
-import { ConstrainedAdjustmentTab } from './components/ConstrainedAdjustmentTab';
-import { QcSkyplotTab } from './components/QcSkyplotTab';
-import { MapTab } from './components/MapTab';
 import { ReportExportTab } from './components/ReportExportTab';
 import { HomeTab } from './components/HomeTab';
 import { PWAInstallButton } from './components/PWAInstallButton';
@@ -62,40 +58,28 @@ import {
   RotateCcw,
   BarChart3,
   Sliders,
-  ShieldCheck,
-  TrendingUp,
-  MapPin,
   FileText,
-  BookOpen,
   CheckCircle2,
-  AlertTriangle,
-  Play,
-  Zap,
   Save,
   FolderOpen,
   ChevronLeft,
   ChevronRight,
-  Compass,
 } from 'lucide-react';
 
 type TabKey =
   | 'home'
   | 'stations'
-  | 'qc'
   | 'baselines'
   | 'loops'
   | 'free_adjustment'
-  | 'constrained_adjustment'
   | 'report';
 
 const WORKFLOW_STEPS: { id: TabKey; title: string; subtitle: string }[] = [
   { id: 'home', title: 'Anasayfa', subtitle: 'Proje oluşturma, açma ve genel durum' },
-  { id: 'stations', title: 'İstasyonlar & RINEX', subtitle: 'GNSS istasyonları, RINEX gözlemleri ve anten parametreleri' },
-  { id: 'qc', title: 'Kalite Kontrol (QC)', subtitle: 'Uydu görünürlüğü, maske açısı ve sinyal kalitesi (Skyplot)' },
+  { id: 'stations', title: 'İstasyonlar & RINEX', subtitle: 'GNSS istasyonları, RINEX gözlemleri, anten parametreleri ve kalite kontrol (QC)' },
   { id: 'baselines', title: 'Baz Çözümleri', subtitle: 'Statik çift fark bağıl baz çözümleri ve kovaryanslar' },
   { id: 'loops', title: 'Döngü Kapanmaları', subtitle: 'Bağımsız üçgen kapanışları ve BÖHYY tolerans kontrolü' },
-  { id: 'free_adjustment', title: 'Serbest Dengeleme', subtitle: 'İç tutarlılık analizi ve Baarda kaba hata denetimi' },
-  { id: 'constrained_adjustment', title: 'Dayalı Dengeleme', subtitle: 'CORS dayanaklı nihai 3D ağ dengelemesi' },
+  { id: 'free_adjustment', title: 'Serbest Dengeleme', subtitle: '3D Gauss-Markov serbest ağ dengelemesi ve Baarda kaba hata denetimi' },
   { id: 'report', title: 'Raporlama & Dışa Aktar', subtitle: 'Resmi BÖHYY karnesi, DXF, KML, GeoJSON ve Excel' },
 ];
 
@@ -112,12 +96,9 @@ export default function App() {
   // Network Elements (Empty initial state)
   const [stations, setStations] = useState<Record<string, Station>>({});
   const [baselines, setBaselines] = useState<BaselineVector[]>([]);
-  const [selectedOccupationStationId, setSelectedOccupationStationId] = useState<string>('');
 
   // Analysis Results
   const [loopClosures, setLoopClosures] = useState<LoopClosure[]>([]);
-  const [unconstrainedResult, setUnconstrainedResult] = useState<AdjustmentResult | null>(null);
-  const [constrainedResult, setConstrainedResult] = useState<AdjustmentResult | null>(null);
   const [adjustmentResult, setAdjustmentResult] = useState<AdjustmentResult | null>(null);
 
   // Native GNSS Worker Engine & Ephemeris
@@ -168,61 +149,50 @@ export default function App() {
     showToast(`Topoloji analiz edildi: ${loops.length} bağımsız üçgen döngüsü tespit edildi.`);
   }, [stations, baselines, config]);
 
-  // Run 3D Network Adjustment
-  const handleRunAdjustment = useCallback(
-    (mode: 'unconstrained' | 'constrained' = 'constrained') => {
-      let currentBaselines = baselines;
-      if (currentBaselines.length === 0 && Object.keys(stations).length >= 2) {
-        currentBaselines = generateBaselinesFromStations(stations);
-        setBaselines(currentBaselines);
-        const loops = calculateLoopClosures(
-          stations,
-          currentBaselines,
-          config.loopToleranceBaseMm,
-          config.loopTolerancePpm
-        );
-        setLoopClosures(loops);
-      }
+  // Run 3D Network Adjustment (Free / Unconstrained Network Adjustment)
+  const handleRunAdjustment = useCallback(() => {
+    let currentBaselines = baselines;
+    if (currentBaselines.length === 0 && Object.keys(stations).length >= 2) {
+      currentBaselines = generateBaselinesFromStations(stations);
+      setBaselines(currentBaselines);
+      const loops = calculateLoopClosures(
+        stations,
+        currentBaselines,
+        config.loopToleranceBaseMm,
+        config.loopTolerancePpm
+      );
+      setLoopClosures(loops);
+    }
 
-      if (Object.keys(stations).length < 2 || currentBaselines.length === 0) {
-        showToast('Dengeleme hesabı için en az 2 nokta gereklidir. Lütfen Veri Girişi adımından RINEX yükleyiniz.');
-        return;
-      }
-      setIsLoading(true);
-      setTimeout(() => {
-        try {
-          const res = perform3DNetworkAdjustment(stations, currentBaselines, mode, config);
-          if (mode === 'unconstrained') {
-            setUnconstrainedResult(res);
-          } else {
-            setConstrainedResult(res);
-          }
-          setAdjustmentResult(res);
+    if (Object.keys(stations).length < 2 || currentBaselines.length === 0) {
+      showToast('Dengeleme hesabı için en az 2 nokta gereklidir. Lütfen Veri Girişi adımından RINEX yükleyiniz.');
+      return;
+    }
+    setIsLoading(true);
+    setTimeout(() => {
+      try {
+        const res = perform3DNetworkAdjustment(stations, currentBaselines, 'unconstrained', config);
+        setAdjustmentResult(res);
 
-          if (res) {
-            // If constrained adjustment, also update stations with adjusted coordinates for reports and downstream tabs
-            if (mode === 'constrained') {
-              setStations((prev) => ({
-                ...prev,
-                ...res.stations,
-              }));
-            }
-            showToast(
-              `3D Gauss-Markov Dengelemesi (${mode === 'constrained' ? 'Dayalı' : 'Serbest'}) tamamlandı! sigma_0: ${res.sigma0Aposteriori.toFixed(4)}`
-            );
-          } else {
-            showToast('Dengeleme için ağ geometrisini kontrol ediniz.');
-          }
-        } catch (err) {
-          console.error('Adjustment execution error:', err);
-          showToast('Dengeleme hesabı sırasında bir hata oluştu.');
-        } finally {
-          setIsLoading(false);
+        if (res) {
+          setStations((prev) => ({
+            ...prev,
+            ...res.stations,
+          }));
+          showToast(
+            `3D Gauss-Markov Serbest Ağ Dengelemesi tamamlandı! σ₀: ${res.sigma0Aposteriori.toFixed(4)}`
+          );
+        } else {
+          showToast('Dengeleme için ağ geometrisini kontrol ediniz.');
         }
-      }, 350);
-    },
-    [stations, baselines, config]
-  );
+      } catch (err) {
+        console.error('Adjustment execution error:', err);
+        showToast('Dengeleme hesabı sırasında bir hata oluştu.');
+      } finally {
+        setIsLoading(false);
+      }
+    }, 350);
+  }, [stations, baselines, config]);
 
   // Exclude Outliers and Re-adjust
   const handleExcludeOutliersAndReAdjust = (outlierIds: string[]) => {
@@ -232,7 +202,7 @@ export default function App() {
     }));
     setBaselines(updated);
 
-    // Recompute
+    // Recompute loops & adjustment
     const loops = calculateLoopClosures(
       stations,
       updated,
@@ -241,14 +211,14 @@ export default function App() {
     );
     setLoopClosures(loops);
 
-    const activeMode = activeTab === 'free_adjustment' ? 'unconstrained' : 'constrained';
-    const res = perform3DNetworkAdjustment(stations, updated, activeMode, config);
-    if (activeMode === 'unconstrained') {
-      setUnconstrainedResult(res);
-    } else {
-      setConstrainedResult(res);
-    }
+    const res = perform3DNetworkAdjustment(stations, updated, 'unconstrained', config);
     setAdjustmentResult(res);
+    if (res) {
+      setStations((prev) => ({
+        ...prev,
+        ...res.stations,
+      }));
+    }
     showToast(`${outlierIds.length} adet kaba hatalı baz elendi ve ağ yeniden dengelendi.`);
   };
 
@@ -297,14 +267,6 @@ export default function App() {
     );
     setLoopClosures(loops);
     showToast(`${generated.length} adet çift fark baz vektörü RTKLIB motoru ile çözüldü.`);
-  };
-
-  const handleDetectedSurveyEpoch = (epoch: number, dateStr?: string) => {
-    setConfig((prev) => ({
-      ...prev,
-      surveyEpoch: epoch,
-    }));
-    showToast(`Ölçü Epoğu RINEX verisinden tespit edildi: t = ${epoch.toFixed(2)}${dateStr ? ` (${dateStr})` : ''}`);
   };
 
   // Baseline Handlers
@@ -454,8 +416,6 @@ export default function App() {
     setStations({});
     setBaselines([]);
     setLoopClosures([]);
-    setUnconstrainedResult(null);
-    setConstrainedResult(null);
     setAdjustmentResult(null);
     setActiveTab('stations');
     showToast('Yeni proje başlatıldı. Lütfen nokta ve baz verilerini giriniz.');
@@ -474,12 +434,14 @@ export default function App() {
       if (project.data.stations) setStations(project.data.stations);
       if (project.data.baselines) setBaselines(project.data.baselines);
       if (project.data.loopClosures) setLoopClosures(project.data.loopClosures);
-      if (project.data.unconstrainedResult) setUnconstrainedResult(project.data.unconstrainedResult);
-      if (project.data.constrainedResult) setConstrainedResult(project.data.constrainedResult);
-      if (project.data.adjustmentResult) setAdjustmentResult(project.data.adjustmentResult);
+      if (project.data.adjustmentResult) {
+        setAdjustmentResult(project.data.adjustmentResult);
+      } else if (project.data.unconstrainedResult) {
+        setAdjustmentResult(project.data.unconstrainedResult);
+      }
     }
-    if (project.data?.constrainedResult || project.data?.adjustmentResult) {
-      setActiveTab('constrained_adjustment');
+    if (project.data?.adjustmentResult || project.data?.unconstrainedResult) {
+      setActiveTab('free_adjustment');
     } else {
       setActiveTab('stations');
     }
@@ -490,6 +452,7 @@ export default function App() {
     try {
       const backupData = data.data || data;
       const projName = data.name || data.projectName || backupData.config?.projectName || 'Yüklenen Proje';
+      const restoredAdj = backupData.adjustmentResult || backupData.unconstrainedResult || null;
       const newProj: SavedProject = {
         id: data.id || 'project-' + Date.now(),
         name: projName,
@@ -498,16 +461,14 @@ export default function App() {
         stationCount: Object.keys(backupData.stations || {}).length,
         baselineCount: (backupData.baselines || []).length,
         pointCount: Object.keys(backupData.stations || {}).length,
-        sigma0: backupData.adjustmentResult?.sigma0Aposteriori || backupData.constrainedResult?.sigma0Aposteriori,
-        isAccepted: backupData.adjustmentResult?.chiSquareTest?.passed ?? backupData.constrainedResult?.chiSquareTest?.passed,
+        sigma0: restoredAdj?.sigma0Aposteriori,
+        isAccepted: restoredAdj?.chiSquareTest?.passed,
         data: {
           config: backupData.config || DEFAULT_CONFIG,
           stations: backupData.stations || {},
           baselines: backupData.baselines || [],
           loopClosures: backupData.loopClosures || [],
-          unconstrainedResult: backupData.unconstrainedResult || null,
-          constrainedResult: backupData.constrainedResult || null,
-          adjustmentResult: backupData.adjustmentResult || null,
+          adjustmentResult: restoredAdj,
         },
       };
       saveProjectToStorage(newProj);
@@ -537,24 +498,21 @@ export default function App() {
   const handleSaveCurrentProject = () => {
     const stCount = Object.keys(stations).length;
     const bsCount = baselines.length;
-    const effectiveResult = constrainedResult || adjustmentResult || unconstrainedResult;
     const project: SavedProject = {
       id: currentProjectId,
       name: config.projectName || 'GNSS Nirengi Projesi',
-      calculatedAt: effectiveResult ? (new Date().toLocaleDateString('tr-TR') + ' ' + new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })) : undefined,
+      calculatedAt: adjustmentResult ? (new Date().toLocaleDateString('tr-TR') + ' ' + new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })) : undefined,
       updatedAt: new Date().toLocaleDateString('tr-TR') + ' ' + new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
       stationCount: stCount,
       baselineCount: bsCount,
       pointCount: stCount,
-      sigma0: effectiveResult?.sigma0Aposteriori,
-      isAccepted: effectiveResult?.chiSquareTest?.passed,
+      sigma0: adjustmentResult?.sigma0Aposteriori,
+      isAccepted: adjustmentResult?.chiSquareTest?.passed,
       data: {
         config,
         stations,
         baselines,
         loopClosures,
-        unconstrainedResult,
-        constrainedResult,
         adjustmentResult,
       },
     };
@@ -597,7 +555,7 @@ export default function App() {
                   )}
                 </div>
                 <p className="text-xs text-slate-400 hidden sm:block">
-                  Dayalı GNSS Nirengi Dengeleme Uygulaması
+                  GNSS Nirengi Dengeleme Uygulaması
                 </p>
               </div>
             </div>
@@ -650,18 +608,6 @@ export default function App() {
           </button>
 
           <button
-            onClick={() => setActiveTab('qc')}
-            className={`px-3.5 py-2.5 text-xs sm:text-sm font-semibold border-b-2 flex items-center gap-2 whitespace-nowrap transition cursor-pointer ${
-              activeTab === 'qc'
-                ? 'border-indigo-600 text-indigo-600'
-                : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <Compass className="w-4 h-4 text-indigo-600" />
-            <span>Kalite Kontrol (QC)</span>
-          </button>
-
-          <button
             onClick={() => setActiveTab('baselines')}
             className={`px-3.5 py-2.5 text-xs sm:text-sm font-semibold border-b-2 flex items-center gap-2 whitespace-nowrap transition cursor-pointer ${
               activeTab === 'baselines'
@@ -701,29 +647,10 @@ export default function App() {
           >
             <Sliders className="w-4 h-4 text-purple-600" />
             <span>Serbest Dengeleme</span>
-            {unconstrainedResult && (
+            {adjustmentResult && (
               <span
                 className={`w-2 h-2 rounded-full ${
-                  unconstrainedResult.chiSquareTest.passed ? 'bg-emerald-500' : 'bg-rose-500'
-                }`}
-              />
-            )}
-          </button>
-
-          <button
-            onClick={() => setActiveTab('constrained_adjustment')}
-            className={`px-3.5 py-2.5 text-xs sm:text-sm font-semibold border-b-2 flex items-center gap-2 whitespace-nowrap transition cursor-pointer ${
-              activeTab === 'constrained_adjustment'
-                ? 'border-indigo-600 text-indigo-600'
-                : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <ShieldCheck className="w-4 h-4 text-indigo-600" />
-            <span>Dayalı Dengeleme</span>
-            {constrainedResult && (
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  constrainedResult.chiSquareTest.passed ? 'bg-emerald-500' : 'bg-rose-500'
+                  adjustmentResult.chiSquareTest.passed ? 'bg-emerald-500' : 'bg-rose-500'
                 }`}
               />
             )}
@@ -759,9 +686,10 @@ export default function App() {
         {activeTab === 'stations' && (
           <StationsAntennaTab
             stations={stations}
+            baselines={baselines}
             dom={config.dom}
             timeZone={config.timeZone}
-            surveyEpoch={config.surveyEpoch}
+            elevationMask={config.elevationMask}
             config={config}
             onChangeConfig={setConfig}
             onResetConfigDefaults={() => setConfig(DEFAULT_CONFIG)}
@@ -769,24 +697,7 @@ export default function App() {
             onAddStation={handleAddStation}
             onDeleteStation={handleDeleteStation}
             onClearAllStations={handleClearAllStations}
-            onDetectedSurveyEpoch={handleDetectedSurveyEpoch}
-            onNavigateToQcTab={(stnId) => {
-              if (stnId) setSelectedOccupationStationId(stnId);
-              setActiveTab('qc');
-            }}
             onNavigateTab={(tab) => setActiveTab(tab as TabKey)}
-          />
-        )}
-
-        {activeTab === 'qc' && (
-          <QcSkyplotTab
-            stations={stations}
-            baselines={baselines}
-            timeZone={config.timeZone}
-            elevationMask={config.elevationMask}
-            selectedStationId={selectedOccupationStationId}
-            onSelectStation={(id) => setSelectedOccupationStationId(id)}
-            onOpenRinexModal={() => setActiveTab('stations')}
           />
         )}
 
@@ -820,25 +731,11 @@ export default function App() {
 
         {activeTab === 'free_adjustment' && (
           <AdjustmentTab
-            mode="unconstrained"
-            adjustmentResult={unconstrainedResult || (adjustmentResult?.mode === 'unconstrained' ? adjustmentResult : null)}
+            adjustmentResult={adjustmentResult}
             config={config}
             onRunAdjustment={handleRunAdjustment}
             onExcludeOutliersAndReAdjust={handleExcludeOutliersAndReAdjust}
             isLoading={isLoading}
-          />
-        )}
-
-        {activeTab === 'constrained_adjustment' && (
-          <ConstrainedAdjustmentTab
-            stations={stations}
-            config={config}
-            adjustmentResult={constrainedResult || (adjustmentResult?.mode === 'constrained' ? adjustmentResult : null)}
-            onUpdateStation={handleUpdateStation}
-            onRunAdjustment={handleRunAdjustment}
-            onExcludeOutliersAndReAdjust={handleExcludeOutliersAndReAdjust}
-            isLoading={isLoading}
-            onNavigateToReport={() => setActiveTab('report')}
           />
         )}
 
@@ -919,7 +816,7 @@ export default function App() {
       <footer className="bg-slate-900 border-t border-slate-800 py-4 mt-auto no-print text-center text-xs text-slate-400 font-medium tracking-wide">
         <div className="max-w-7xl mx-auto px-4 flex items-center justify-center">
           <div>
-            ACB Maps - Nirengi Hesabı v1.0
+            BSR Maps - Nirengi Hesabı v1.0
           </div>
         </div>
       </footer>

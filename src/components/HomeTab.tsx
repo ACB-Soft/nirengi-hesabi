@@ -116,7 +116,7 @@ export const HomeTab: React.FC<HomeTabProps> = ({
 
   const handleDownloadProjectJSON = (p: SavedProject) => {
     const exportPayload = {
-      app: 'ACB Maps - Nirengi Hesabı',
+      app: 'BSR Maps - Nirengi Hesabı',
       version: '1.0',
       exportedAt: new Date().toISOString(),
       id: p.id,
@@ -134,9 +134,7 @@ export const HomeTab: React.FC<HomeTabProps> = ({
         stations: p.data?.stations,
         baselines: p.data?.baselines,
         loopClosures: p.data?.loopClosures,
-        unconstrainedResult: p.data?.unconstrainedResult,
-        constrainedResult: p.data?.constrainedResult,
-        adjustmentResult: p.data?.adjustmentResult,
+        adjustmentResult: p.data?.adjustmentResult || p.data?.unconstrainedResult,
       },
     };
     const signedPayload = signBackupData(exportPayload);

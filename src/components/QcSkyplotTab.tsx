@@ -20,7 +20,6 @@ import {
   computeDopMetrics,
 } from '../utils/skyplotEngine';
 import { TopconOccupationViewer } from './TopconOccupationViewer';
-import { TopconCadMapViewer } from './TopconCadMapViewer';
 import {
   Radio,
   Clock,
@@ -40,12 +39,10 @@ import {
   Eye,
   RefreshCw,
   Upload,
-  LayoutGrid,
-  Columns,
   Maximize2,
 } from 'lucide-react';
 
-export type ViewWindowMode = 'occupation' | 'cad_map' | 'split' | 'skyplot' | 'snr';
+export type ViewWindowMode = 'occupation' | 'skyplot' | 'snr';
 
 interface Props {
   stations: Record<string, Station>;
@@ -55,6 +52,7 @@ interface Props {
   onOpenRinexModal?: () => void;
   selectedStationId?: string;
   onSelectStation?: (id: string) => void;
+  isModal?: boolean;
 }
 
 export const QcSkyplotTab: React.FC<Props> = ({
@@ -65,6 +63,7 @@ export const QcSkyplotTab: React.FC<Props> = ({
   onOpenRinexModal,
   selectedStationId,
   onSelectStation,
+  isModal = false,
 }) => {
   const stationList = Object.values(stations);
 
@@ -84,8 +83,8 @@ export const QcSkyplotTab: React.FC<Props> = ({
   const currentStation = stations[activeStationId] || stationList[0];
   const occupation = currentStation?.occupation;
 
-  // Viewing Window Mode: default to 'split' or 'occupation'
-  const [windowMode, setWindowMode] = useState<ViewWindowMode>('split');
+  // Viewing Window Mode: default to 'occupation'
+  const [windowMode, setWindowMode] = useState<ViewWindowMode>('occupation');
 
   // View States for Skyplot
   const [selectedSystem, setSelectedSystem] = useState<string>('ALL');
@@ -200,59 +199,37 @@ export const QcSkyplotTab: React.FC<Props> = ({
       {/* Top Banner & Window View Switcher Toolbar */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div>
-            <h2 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
-              <span>Kalite Kontrol & GNSS Görüntüleme Pencereleri</span>
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold border border-emerald-300">
-                Topcon Tools Standart
-              </span>
-            </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Oturum zaman çizelgeleri, CAD koordinat ağ haritası, kutupsal gökyüzü görünürlüğü ve SNR analizleri.
-            </p>
-          </div>
+          {!isModal && (
+            <div>
+              <h2 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
+                <span>Kalite Kontrol & GNSS Görüntüleme Pencereleri</span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold border border-emerald-300">
+                  Topcon Tools Standart
+                </span>
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Oturum zaman çizelgeleri (Occupation View), kutupsal gökyüzü görünürlüğü ve SNR analizleri.
+              </p>
+            </div>
+          )}
 
           {/* Window Mode Switcher Buttons */}
-          <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl text-xs overflow-x-auto">
-            <button
-              onClick={() => setWindowMode('split')}
-              className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition whitespace-nowrap ${
-                windowMode === 'split'
-                  ? 'bg-white text-slate-900 shadow-2xs border border-slate-200'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <LayoutGrid className="w-3.5 h-3.5 text-blue-600" />
-              <span>Bölünmüş Pencere</span>
-            </button>
-
+          <div className={`flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl text-xs overflow-x-auto ${isModal ? 'w-full lg:w-auto' : ''}`}>
             <button
               onClick={() => setWindowMode('occupation')}
-              className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition whitespace-nowrap ${
+              className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition whitespace-nowrap cursor-pointer ${
                 windowMode === 'occupation'
                   ? 'bg-white text-slate-900 shadow-2xs border border-slate-200'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               <Clock className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Oturum Görünümü</span>
-            </button>
-
-            <button
-              onClick={() => setWindowMode('cad_map')}
-              className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition whitespace-nowrap ${
-                windowMode === 'cad_map'
-                  ? 'bg-white text-slate-900 shadow-2xs border border-slate-200'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <Compass className="w-3.5 h-3.5 text-sky-600" />
-              <span>Ağ Haritası (CAD)</span>
+              <span>Oturum Görünümü (Occupation View)</span>
             </button>
 
             <button
               onClick={() => setWindowMode('skyplot')}
-              className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition whitespace-nowrap ${
+              className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition whitespace-nowrap cursor-pointer ${
                 windowMode === 'skyplot'
                   ? 'bg-white text-slate-900 shadow-2xs border border-slate-200'
                   : 'text-slate-600 hover:text-slate-900'
@@ -264,7 +241,7 @@ export const QcSkyplotTab: React.FC<Props> = ({
 
             <button
               onClick={() => setWindowMode('snr')}
-              className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition whitespace-nowrap ${
+              className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition whitespace-nowrap cursor-pointer ${
                 windowMode === 'snr'
                   ? 'bg-white text-slate-900 shadow-2xs border border-slate-200'
                   : 'text-slate-600 hover:text-slate-900'
@@ -274,10 +251,31 @@ export const QcSkyplotTab: React.FC<Props> = ({
               <span>SNR Serisi</span>
             </button>
           </div>
+
+          {isModal && (
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-slate-600 text-xs flex items-center gap-1">
+                <Radio className="w-3.5 h-3.5 text-sky-600" />
+                <span>Aktif İstasyon:</span>
+              </span>
+              <select
+                value={activeStationId}
+                onChange={(e) => handleSelectStationInternal(e.target.value)}
+                className="px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 shadow-2xs focus:ring-1 focus:ring-sky-500"
+              >
+                {stationList.map((st) => (
+                  <option key={st.id} value={st.id}>
+                    {st.name} ({st.type === 'CORS' ? 'CORS Sabit' : 'Rover Nokta'})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
         {/* Quick Station Selector Bar */}
-        <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 text-xs">
+        {!isModal && (
+          <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-2">
             <span className="font-semibold text-slate-600 flex items-center gap-1">
               <Radio className="w-3.5 h-3.5 text-sky-600" />
@@ -304,50 +302,15 @@ export const QcSkyplotTab: React.FC<Props> = ({
             <span>Yerel Saat: {timeZone}</span>
           </div>
         </div>
+        )}
       </div>
 
-      {/* WINDOW VIEW MODE 1: SPLIT VIEW (CAD MAP + OCCUPATION VIEW SIMULTANEOUSLY) */}
-      {windowMode === 'split' && (
-        <div className="space-y-4 animate-in fade-in">
-          {/* Top Window: Topcon CAD Map View */}
-          <TopconCadMapViewer
-            stations={stations}
-            baselines={baselines}
-            selectedStationId={activeStationId}
-            onSelectStation={handleSelectStationInternal}
-            className="w-full"
-          />
-
-          {/* Bottom Window: Topcon Occupation View */}
-          <TopconOccupationViewer
-            stations={stations}
-            timeZone={timeZone}
-            selectedStationId={activeStationId}
-            onSelectStation={handleSelectStationInternal}
-            className="w-full"
-          />
-        </div>
-      )}
-
-      {/* WINDOW VIEW MODE 2: OCCUPATION VIEW FULL WINDOW */}
+      {/* WINDOW VIEW MODE 1: OCCUPATION VIEW FULL WINDOW */}
       {windowMode === 'occupation' && (
         <div className="space-y-3 animate-in fade-in">
           <TopconOccupationViewer
             stations={stations}
             timeZone={timeZone}
-            selectedStationId={activeStationId}
-            onSelectStation={handleSelectStationInternal}
-            className="w-full shadow-md"
-          />
-        </div>
-      )}
-
-      {/* WINDOW VIEW MODE 3: CAD MAP VIEW FULL WINDOW */}
-      {windowMode === 'cad_map' && (
-        <div className="space-y-3 animate-in fade-in">
-          <TopconCadMapViewer
-            stations={stations}
-            baselines={baselines}
             selectedStationId={activeStationId}
             onSelectStation={handleSelectStationInternal}
             className="w-full shadow-md"

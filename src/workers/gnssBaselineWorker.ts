@@ -151,7 +151,14 @@ export function solveNativeBaseline(
   }
 
   // 2. Compute satellite positions and elevations
-  const obsTimeSec = (fromStn.observationEpoch || 2025.29) * 31557600 % 604800; // approximate TOW
+  const obsTimeSec = (() => {
+    const str = fromStn.occupation?.firstEpochDate || fromStn.observationDateStr;
+    if (str) {
+      const parsed = Date.parse(str.replace(' GPS', 'Z'));
+      if (!isNaN(parsed)) return ((parsed / 1000) % 604800);
+    }
+    return 3600;
+  })();
   interface SatVis {
     prn: string;
     pos: [number, number, number];

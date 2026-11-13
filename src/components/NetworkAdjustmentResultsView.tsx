@@ -32,21 +32,18 @@ import {
 interface Props {
   adjustmentResult: AdjustmentResult;
   config: JobConfig;
-  mode: 'unconstrained' | 'constrained';
   onExcludeOutliersAndReAdjust?: (outlierIds: string[]) => void;
 }
 
 export const NetworkAdjustmentResultsView: React.FC<Props> = ({
   adjustmentResult,
   config,
-  mode,
   onExcludeOutliersAndReAdjust,
 }) => {
   const [selectedSubTab, setSelectedSubTab] = useState<'coords' | 'residuals' | 'ellipses' | 'matrix'>('coords');
   const [selectedEllipseStationId, setSelectedEllipseStationId] = useState<string>('');
   const [coordViewMode, setCoordViewMode] = useState<'standard' | 'antenna_levels'>('standard');
 
-  const isFree = mode === 'unconstrained';
   const stationList = Object.values(adjustmentResult.stations);
   const activeStation = stationList.find((s) => s.id === selectedEllipseStationId) || stationList[0];
 

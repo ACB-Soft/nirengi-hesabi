@@ -8,7 +8,7 @@
 
 import React, { useState } from 'react';
 import { JobConfig, AdjustmentResult, LoopClosure, Station } from '../types/gnss';
-import { exportAdjustmentToExcel, exportVelocityReportToExcel } from '../utils/geodesy';
+import { exportAdjustmentToExcel } from '../utils/geodesy';
 import {
   exportNetworkToDxf,
   exportNetworkToKml,
@@ -61,11 +61,6 @@ export const ReportExportTab: React.FC<Props> = ({
   const showNotification = (msg: string) => {
     setExportNotice(msg);
     setTimeout(() => setExportNotice(null), 3000);
-  };
-
-  const handleExportVelocityExcel = () => {
-    exportVelocityReportToExcel(stations, config.surveyEpoch, config.refEpoch, config.dom, config.projectName);
-    showNotification('TUSAGA Hız Hesabı ve Epok Kaydırma tablosu Excel (.xlsx) olarak indirildi.');
   };
 
   const handleExportExcel = () => {
@@ -125,8 +120,6 @@ export const ReportExportTab: React.FC<Props> = ({
           baselines: adjustmentResult?.baselines || [],
           loopClosures,
           adjustmentResult,
-          constrainedResult: adjustmentResult?.mode === 'constrained' ? adjustmentResult : null,
-          unconstrainedResult: adjustmentResult?.mode === 'unconstrained' ? adjustmentResult : null,
         },
       };
 
@@ -159,9 +152,7 @@ export const ReportExportTab: React.FC<Props> = ({
     reportTxt += `İdare / Kurum       : ${config.institution}\n`;
     reportTxt += `Koordinat Sistemi   : ${config.crsSystem} (DOM: ${config.dom} Derece)\n`;
     reportTxt += `Referans Elipsoidi  : ${config.ellipsoid} (a=6378137.0 m, 1/f=298.257222101)\n`;
-    reportTxt += `Ölçü Epoğu (t)      : ${config.surveyEpoch.toFixed(2)}\n`;
-    reportTxt += `Referans Epoğu      : ${config.refEpoch.toFixed(2)}\n`;
-    reportTxt += `Dengeleme Modu      : ${adjustmentResult.mode === 'constrained' ? 'Dayalı (CORS Sabit)' : 'Serbest (İç Tutarlılık)'}\n`;
+    reportTxt += `Dengeleme Modu      : 3D Serbest Ağ Dengelemesi (İç Tutarlılık)\n`;
     reportTxt += `Hesaplama Tarihi    : ${new Date().toLocaleString('tr-TR')}\n\n`;
 
     reportTxt += `DENGELEME İSTATİSTİKLERİ:\n`;
@@ -242,18 +233,11 @@ export const ReportExportTab: React.FC<Props> = ({
         <FileText className="w-12 h-12 text-slate-300 mx-auto" />
         <h3 className="text-base font-bold text-slate-800">Dengeleme Hesabı Henüz Çalıştırılmadı</h3>
         <p className="text-xs text-slate-500 max-w-md mx-auto">
-          Resmi BÖHYY dengeleme hesap karnesi ve CAD/CBS dışa aktarımı için "Dayalı Dengeleme" sekmesinden çözümü çalıştırınız.
-          İstasyonlarınıza ait hız raporunu veya mevcut nokta verilerini doğrudan indirebilirsiniz.
+          Resmi BÖHYY dengeleme hesap karnesi ve CAD/CBS dışa aktarımı için &quot;Serbest Dengeleme&quot; sekmesinden çözümü çalıştırınız.
+          Mevcut nokta verilerinizi doğrudan CAD formatlarında indirebilirsiniz.
         </p>
         {Object.keys(stations).length > 0 && (
           <div className="pt-2 flex items-center justify-center gap-3 flex-wrap">
-            <button
-              onClick={handleExportVelocityExcel}
-              className="px-5 py-2.5 text-xs font-bold bg-purple-700 hover:bg-purple-800 text-white rounded-xl shadow-sm transition cursor-pointer inline-flex items-center gap-2"
-            >
-              <FileSpreadsheet className="w-4 h-4" />
-              <span>Hız Hesabı Excel (.xlsx)</span>
-            </button>
             <button
               onClick={handleExportNetcadNcn}
               className="px-5 py-2.5 text-xs font-bold bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl shadow-sm transition cursor-pointer inline-flex items-center gap-2"
@@ -526,9 +510,9 @@ export const ReportExportTab: React.FC<Props> = ({
             <strong className="text-slate-900">{config.crsSystem} (DOM: {config.dom}&deg;)</strong>
           </div>
           <div>
-            <span className="text-slate-500 block text-[10px] font-semibold">Ölçü / Referans Epoğu:</span>
-            <strong className="text-slate-900 font-mono">
-              {config.surveyEpoch.toFixed(2)} &rarr; {config.refEpoch.toFixed(2)}
+            <span className="text-slate-500 block text-[10px] font-semibold">Dengeleme Modu:</span>
+            <strong className="text-slate-900">
+              3D Serbest Ağ Dengelemesi
             </strong>
           </div>
         </div>

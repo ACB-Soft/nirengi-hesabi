@@ -15,10 +15,6 @@ import {
   JobConfig,
   CRSSystem,
   AntennaData,
-  GeoCalcPoint,
-  StationVelocities,
-  VelocityReportItem,
-  VelocityInterpolationDetail,
   RinexOccupation,
   SatelliteTrack,
   GnssConstellation,
@@ -27,28 +23,6 @@ import {
   IgsSp3File,
 } from '../types/gnss';
 import { matchAntennaInNoaaCatalog, NOAA_ANTCAL_CATALOG, NoaaAntennaCalibration } from '../data/noaaAntcal';
-
-// ============================================================================
-// TUSAGA-AKTIF TECTONIC VELOCITY CATALOG (ITRF96 / TUREF Epoch 2005.00)
-// ============================================================================
-export const TUSAGA_VELOCITY_CATALOG: Record<string, StationVelocities & { name: string; city: string }> = {
-  ANKR: { name: 'ANKR (Ankara)', city: 'Ankara', vx: -0.0142, vy: -0.0210, vz: 0.0088, ve: -21.2, vn: 13.5, vu: 1.1 },
-  KONY: { name: 'KONY (Konya)', city: 'Konya', vx: -0.0160, vy: -0.0225, vz: 0.0075, ve: -22.8, vn: 14.8, vu: 0.8 },
-  ISTN: { name: 'ISTN (İstanbul)', city: 'İstanbul', vx: -0.0135, vy: -0.0195, vz: 0.0092, ve: -19.8, vn: 12.4, vu: 1.0 },
-  IZMR: { name: 'IZMR (İzmir)', city: 'İzmir', vx: -0.0185, vy: -0.0250, vz: 0.0065, ve: -25.4, vn: 16.2, vu: 0.5 },
-  TRAB: { name: 'TRAB (Trabzon)', city: 'Trabzon', vx: -0.0110, vy: -0.0165, vz: 0.0110, ve: -16.5, vn: 10.2, vu: 1.4 },
-  DIYA: { name: 'DIYA (Diyarbakır)', city: 'Diyarbakır', vx: -0.0145, vy: -0.0205, vz: 0.0090, ve: -20.5, vn: 13.0, vu: 1.2 },
-  ERZU: { name: 'ERZU (Erzurum)', city: 'Erzurum', vx: -0.0125, vy: -0.0180, vz: 0.0102, ve: -18.2, vn: 11.5, vu: 1.3 },
-  ADAN: { name: 'ADAN (Adana)', city: 'Adana', vx: -0.0170, vy: -0.0235, vz: 0.0078, ve: -23.5, vn: 15.0, vu: 0.7 },
-  BURS: { name: 'BURS (Bursa)', city: 'Bursa', vx: -0.0150, vy: -0.0215, vz: 0.0085, ve: -21.6, vn: 13.8, vu: 1.0 },
-  BRS1: { name: 'BRS1 (Bursa Merkez CORS)', city: 'Bursa', vx: -0.0163, vy: -0.0215, vz: 0.0085, ve: -21.6, vn: 13.8, vu: 1.0 },
-  HARC: { name: 'HARC (Harmancık CORS)', city: 'Bursa', vx: -0.0172, vy: -0.0228, vz: 0.0078, ve: -22.9, vn: 14.5, vu: 0.8 },
-  BAN1: { name: 'BAN1 (Bandırma CORS)', city: 'Balıkesir', vx: -0.0155, vy: -0.0220, vz: 0.0082, ve: -22.1, vn: 14.1, vu: 1.1 },
-  SIVA: { name: 'SIVA (Sivas)', city: 'Sivas', vx: -0.0138, vy: -0.0198, vz: 0.0095, ve: -19.9, vn: 12.8, vu: 1.2 },
-  SAMS: { name: 'SAMS (Samsun)', city: 'Samsun', vx: -0.0120, vy: -0.0175, vz: 0.0105, ve: -17.6, vn: 11.0, vu: 1.5 },
-  YOZG: { name: 'YOZG (Yozgat)', city: 'Yozgat', vx: -0.0140, vy: -0.0208, vz: 0.0090, ve: -20.9, vn: 13.3, vu: 1.1 },
-  DEFAULT: { name: 'Türkiye Geneli Ortalama', city: 'Türkiye', vx: -0.0150, vy: -0.0218, vz: 0.0084, ve: -21.5, vn: 14.0, vu: 1.0 },
-};
 
 /**
  * Calculates detailed IGS Precise Orbit Product information for a given observation date
@@ -989,8 +963,6 @@ export function parseRinexHeader(rinexText: string, fileName?: string): Partial<
       pcoL2,
       pcvZenith,
     },
-    velocities: { vx: -0.016, vy: 0.023, vz: 0.009 },
-    observationEpoch: detectedEpoch,
     observationDateStr: detectedDateStr,
     occupation: occupation || undefined,
     isFixed: { x: false, y: false, z: false },
@@ -1480,10 +1452,6 @@ export function parseTusagaStationText(text: string): Station[] {
         z = e.z;
       }
 
-      const vx = parts.length >= 7 ? parseFloat(parts[4]) : -0.016;
-      const vy = parts.length >= 7 ? parseFloat(parts[5]) : 0.023;
-      const vz = parts.length >= 7 ? parseFloat(parts[6]) : 0.009;
-
       const tm = geodeticToTM(lat, lon, 33);
 
       stations.push({
@@ -1510,7 +1478,6 @@ export function parseTusagaStationText(text: string): Station[] {
           pcoL2: { n: 0.9, e: -0.2, u: 82.1 },
           pcvZenith: [0, 0.6, 1.4, 2.5, 4.1],
         },
-        velocities: { vx, vy, vz },
       });
     }
   }
@@ -1756,57 +1723,33 @@ export function invertMatrix(A: number[][]): number[][] | null {
 }
 
 /**
- * Computes and shifts a station's survey epoch coordinates from 2005.00 reference epoch and official velocities:
- * X(t) = X_2005 + Vx * (surveyEpoch - 2005.00)
- * Y(t) = Y_2005 + Vy * (surveyEpoch - 2005.00)
- * Z(t) = Z_2005 + Vz * (surveyEpoch - 2005.00)
- * Then computes Bowring/GRS80 Geodetic (phi, lam, h) and Transverse Mercator (Y, X) projection coordinates.
+ * Computes Bowring/GRS80 Geodetic (lat, lon, h) and Transverse Mercator (Y, X) projection coordinates
+ * directly from ECEF Cartesian coordinates (x, y, z).
  */
-export function computeStationEpochCoordinates(
+export function computeStationCoordinates(
   st: Station,
-  surveyEpoch: number = 2026.0,
   domDeg: number = 30
 ): Station {
-  const refEpoch = 2005.00;
-  const dt = surveyEpoch - refEpoch;
+  const x = typeof st.x === 'number' && !isNaN(st.x) ? st.x : 0;
+  const y = typeof st.y === 'number' && !isNaN(st.y) ? st.y : 0;
+  const z = typeof st.z === 'number' && !isNaN(st.z) ? st.z : 0;
 
-  // Use refX if defined, otherwise st.x
-  const refX = typeof st.refX === 'number' && !isNaN(st.refX) && st.refX !== 0 ? st.refX : st.x;
-  const refY = typeof st.refY === 'number' && !isNaN(st.refY) && st.refY !== 0 ? st.refY : st.y;
-  const refZ = typeof st.refZ === 'number' && !isNaN(st.refZ) && st.refZ !== 0 ? st.refZ : st.z;
+  const geo = (x !== 0 || y !== 0 || z !== 0)
+    ? ecefToGeodetic(x, y, z)
+    : { lat: st.lat || 0, lon: st.lon || 0, h: st.h || 0 };
 
-  const vx = st.velocities?.vx || 0;
-  const vy = st.velocities?.vy || 0;
-  const vz = st.velocities?.vz || 0;
-
-  const surveyX = refX + vx * dt;
-  const surveyY = refY + vy * dt;
-  const surveyZ = refZ + vz * dt;
-
-  const refGeo = ecefToGeodetic(refX, refY, refZ);
-  const refTM = geodeticToTM(refGeo.lat, refGeo.lon, domDeg);
-
-  const surveyGeo = ecefToGeodetic(surveyX, surveyY, surveyZ);
-  const surveyTM = geodeticToTM(surveyGeo.lat, surveyGeo.lon, domDeg);
+  const tm = geodeticToTM(geo.lat, geo.lon, domDeg);
 
   return {
     ...st,
-    refX,
-    refY,
-    refZ,
-    refLat: refGeo.lat,
-    refLon: refGeo.lon,
-    refH: refGeo.h,
-    refProjY: refTM.projY,
-    refProjX: refTM.projX,
-    x: surveyX,
-    y: surveyY,
-    z: surveyZ,
-    lat: surveyGeo.lat,
-    lon: surveyGeo.lon,
-    h: surveyGeo.h,
-    projY: surveyTM.projY,
-    projX: surveyTM.projX,
+    x,
+    y,
+    z,
+    lat: geo.lat,
+    lon: geo.lon,
+    h: geo.h,
+    projY: tm.projY,
+    projX: tm.projX,
   };
 }
 
@@ -1873,7 +1816,7 @@ function invert3x3(m: [
 export function perform3DNetworkAdjustment(
   inputStations: Record<string, Station>,
   inputBaselines: BaselineVector[],
-  mode: 'unconstrained' | 'constrained' = 'constrained',
+  mode: 'unconstrained' = 'unconstrained',
   config: JobConfig
 ): AdjustmentResult | null {
   try {
@@ -1889,45 +1832,14 @@ export function perform3DNetworkAdjustment(
     }
     if (activeBaselines.length < 1) return null;
 
-    // Determine fixed and unknown stations
+    // Free Network Adjustment: exactly 1 datum station is fixed
     const fixedStationIds: string[] = [];
     const unknownStationIds: string[] = [];
 
-    if (mode === 'unconstrained') {
-      // In free network mode: pick the primary CORS station (or first station) as sole fixed datum
-      const corsStn = stationKeys.find((id) => inputStations[id].type === 'CORS' || inputStations[id].isFixed.x) || stationKeys[0];
-      fixedStationIds.push(corsStn);
-      for (const id of stationKeys) {
-        if (id !== corsStn) unknownStationIds.push(id);
-      }
-    } else {
-      // In constrained mode: fixed stations are those marked as isFixed.x, y, z or CORS
-      for (const id of stationKeys) {
-        const st = inputStations[id];
-        if ((st.isFixed.x && st.isFixed.y && st.isFixed.z) || st.type === 'CORS') {
-          fixedStationIds.push(id);
-        } else {
-          unknownStationIds.push(id);
-        }
-      }
-
-      // Guard: If all stations were marked fixed, treat non-first stations as unknowns so adjustment can proceed
-      if (unknownStationIds.length === 0) {
-        const primary = fixedStationIds[0] || stationKeys[0];
-        fixedStationIds.length = 0;
-        fixedStationIds.push(primary);
-        for (const id of stationKeys) {
-          if (id !== primary) unknownStationIds.push(id);
-        }
-      }
-
-      // If no stations are fixed in constrained mode, fix the first CORS or first point
-      if (fixedStationIds.length === 0) {
-        const fallback = stationKeys.find((id) => inputStations[id].type === 'CORS') || stationKeys[0];
-        fixedStationIds.push(fallback);
-        const idx = unknownStationIds.indexOf(fallback);
-        if (idx !== -1) unknownStationIds.splice(idx, 1);
-      }
+    const corsStn = stationKeys.find((id) => inputStations[id].type === 'CORS' || inputStations[id].isFixed.x) || stationKeys[0];
+    fixedStationIds.push(corsStn);
+    for (const id of stationKeys) {
+      if (id !== corsStn) unknownStationIds.push(id);
     }
 
     const uCount = unknownStationIds.length;
@@ -1947,24 +1859,49 @@ export function perform3DNetworkAdjustment(
       unknownIndexMap[unknownStationIds[i]] = i;
     }
 
-    // Current station coordinates (at survey epoch)
-    const dt = (config.surveyEpoch || 2026.0) - (config.refEpoch || 2005.00);
+    // Initialize coordinates directly from station coordinates without epoch or velocity shifting
     const currentCoords: Record<string, { x: number; y: number; z: number }> = {};
     for (const id of stationKeys) {
       const st = inputStations[id];
-      const refX = typeof st.refX === 'number' && !isNaN(st.refX) && st.refX !== 0 ? st.refX : st.x;
-      const refY = typeof st.refY === 'number' && !isNaN(st.refY) && st.refY !== 0 ? st.refY : st.y;
-      const refZ = typeof st.refZ === 'number' && !isNaN(st.refZ) && st.refZ !== 0 ? st.refZ : st.z;
-
-      const vx = st.velocities?.vx || 0;
-      const vy = st.velocities?.vy || 0;
-      const vz = st.velocities?.vz || 0;
-
       currentCoords[id] = {
-        x: refX + vx * dt,
-        y: refY + vy * dt,
-        z: refZ + vz * dt,
+        x: Number(st.x) || 0,
+        y: Number(st.y) || 0,
+        z: Number(st.z) || 0,
       };
+    }
+
+    // If any station has (0, 0, 0) coordinates, propagate along baseline spanning tree from datum point
+    const hasZeroCoords = stationKeys.some((id) => currentCoords[id].x === 0 && currentCoords[id].y === 0 && currentCoords[id].z === 0);
+    if (hasZeroCoords) {
+      const queue = [corsStn];
+      const visited = new Set<string>([corsStn]);
+      while (queue.length > 0) {
+        const curr = queue.shift()!;
+        const currC = currentCoords[curr];
+        for (const b of activeBaselines) {
+          if (b.fromId === curr && !visited.has(b.toId)) {
+            if (currentCoords[b.toId].x === 0 && currentCoords[b.toId].y === 0 && currentCoords[b.toId].z === 0) {
+              currentCoords[b.toId] = {
+                x: currC.x + b.dX,
+                y: currC.y + b.dY,
+                z: currC.z + b.dZ,
+              };
+            }
+            visited.add(b.toId);
+            queue.push(b.toId);
+          } else if (b.toId === curr && !visited.has(b.fromId)) {
+            if (currentCoords[b.fromId].x === 0 && currentCoords[b.fromId].y === 0 && currentCoords[b.fromId].z === 0) {
+              currentCoords[b.fromId] = {
+                x: currC.x - b.dX,
+                y: currC.y - b.dY,
+                z: currC.z - b.dZ,
+              };
+            }
+            visited.add(b.fromId);
+            queue.push(b.fromId);
+          }
+        }
+      }
     }
 
     let iterations = 0;
@@ -2479,304 +2416,7 @@ export function perform3DNetworkAdjustment(
   }
 }
 
-// ============================================================================
-// EPOCH TRANSFORMATION & GEOCALCULATOR (2005.00 Reference Epoch)
-// ============================================================================
 
-/**
- * Propagates coordinates between epochs using TUSAGA / TUTGA velocities:
- * X_dst = X_src + Vx * (targetEpoch - sourceEpoch)
- */
-export function propagateEpoch(
-  st: Station,
-  sourceEpoch: number,
-  targetEpoch: number,
-  domDeg: number = 33
-): GeoCalcPoint {
-  const dt = targetEpoch - sourceEpoch;
-
-  const dstX = st.x + st.velocities.vx * dt;
-  const dstY = st.y + st.velocities.vy * dt;
-  const dstZ = st.z + st.velocities.vz * dt;
-
-  const srcGeo = ecefToGeodetic(st.x, st.y, st.z);
-  const srcTM = geodeticToTM(srcGeo.lat, srcGeo.lon, domDeg);
-
-  const dstGeo = ecefToGeodetic(dstX, dstY, dstZ);
-  const dstTM = geodeticToTM(dstGeo.lat, dstGeo.lon, domDeg);
-
-  const dX_mm = (dstX - st.x) * 1000.0;
-  const dY_mm = (dstY - st.y) * 1000.0;
-  const dZ_mm = (dstZ - st.z) * 1000.0;
-  const dSpatial_mm = Math.sqrt(dX_mm * dX_mm + dY_mm * dY_mm + dZ_mm * dZ_mm);
-
-  return {
-    stationName: st.name,
-    sourceEpoch,
-    targetEpoch,
-    srcX: st.x,
-    srcY: st.y,
-    srcZ: st.z,
-    srcLat: srcGeo.lat,
-    srcLon: srcGeo.lon,
-    srcH: srcGeo.h,
-    srcProjY: srcTM.projY,
-    srcProjX: srcTM.projX,
-    vx: st.velocities.vx,
-    vy: st.velocities.vy,
-    vz: st.velocities.vz,
-    dstX,
-    dstY,
-    dstZ,
-    dstLat: dstGeo.lat,
-    dstLon: dstGeo.lon,
-    dstH: dstGeo.h,
-    dstProjY: dstTM.projY,
-    dstProjX: dstTM.projX,
-    dX: dX_mm,
-    dY: dY_mm,
-    dZ: dZ_mm,
-    dSpatial: dSpatial_mm,
-  };
-}
-
-/**
- * GeoCalculator TUTGA Hız Kestirim Motoru (Inverse Distance Weighting - IDW Interpolation)
- * Hızı bilinen referans TUSAGA/TUTGA noktalarının hız vektörlerini (Vx, Vy, Vz) kullanarak
- * yeni ölçülen proje noktalarının hızlarını enterpolasyonla otomatik kestirir.
- */
-export function estimateVelocitiesByTUTGA(
-  stations: Record<string, Station>
-): Record<string, StationVelocities> {
-  const stationList = Object.values(stations);
-  const refStations = stationList.filter(
-    (s) => s.isFixed.x || s.type === 'CORS' || (s.velocities && (s.velocities.vx !== 0 || s.velocities.vy !== 0))
-  );
-
-  const estimated: Record<string, StationVelocities> = {};
-  const defaultVel: StationVelocities = { vx: -0.0162, vy: 0.0234, vz: 0.0089 };
-
-  for (const st of stationList) {
-    if (refStations.length === 0) {
-      estimated[st.id] = defaultVel;
-      continue;
-    }
-
-    if (st.isFixed.x && st.velocities) {
-      estimated[st.id] = { ...st.velocities };
-      continue;
-    }
-
-    let sumWeight = 0;
-    let sumVx = 0;
-    let sumVy = 0;
-    let sumVz = 0;
-
-    for (const ref of refStations) {
-      const dx = st.x - ref.x;
-      const dy = st.y - ref.y;
-      const dz = st.z - ref.z;
-      const distKm = Math.sqrt(dx * dx + dy * dy + dz * dz) / 1000.0;
-      const d = Math.max(distKm, 0.05);
-      const w = 1.0 / (d * d);
-
-      sumWeight += w;
-      sumVx += w * ref.velocities.vx;
-      sumVy += w * ref.velocities.vy;
-      sumVz += w * ref.velocities.vz;
-    }
-
-    if (sumWeight > 0) {
-      const vx = Number((sumVx / sumWeight).toFixed(5));
-      const vy = Number((sumVy / sumWeight).toFixed(5));
-      const vz = Number((sumVz / sumWeight).toFixed(5));
-      const topo = cartesianToTopocentricVelocity(vx, vy, vz, st.lat || 39.0, st.lon || 35.0);
-      estimated[st.id] = {
-        vx,
-        vy,
-        vz,
-        ve: topo.ve,
-        vn: topo.vn,
-        vu: topo.vu,
-      };
-    } else {
-      const topo = cartesianToTopocentricVelocity(defaultVel.vx, defaultVel.vy, defaultVel.vz, st.lat || 39.0, st.lon || 35.0);
-      estimated[st.id] = {
-        ...defaultVel,
-        ve: topo.ve,
-        vn: topo.vn,
-        vu: topo.vu,
-      };
-    }
-  }
-
-  return estimated;
-}
-
-/**
- * Returns IDW interpolation breakdown for an unknown station based on reference CORS stations.
- */
-export function getStationInterpolationDetails(
-  st: Station,
-  stations: Record<string, Station>
-): VelocityInterpolationDetail[] {
-  const stationList = Object.values(stations);
-  const refStations = stationList.filter(
-    (s) => s.id !== st.id && (s.isFixed.x || s.type === 'CORS' || (s.velocities && (s.velocities.vx !== 0 || s.velocities.vy !== 0)))
-  );
-
-  if (refStations.length === 0) return [];
-
-  let sumWeight = 0;
-  const items: Array<{
-    ref: Station;
-    distKm: number;
-    weight: number;
-  }> = [];
-
-  for (const ref of refStations) {
-    const dx = st.x - ref.x;
-    const dy = st.y - ref.y;
-    const dz = st.z - ref.z;
-    const distKm = Math.sqrt(dx * dx + dy * dy + dz * dz) / 1000.0;
-    const d = Math.max(distKm, 0.05);
-    const weight = 1.0 / (d * d);
-    sumWeight += weight;
-    items.push({ ref, distKm, weight });
-  }
-
-  return items.map((item) => {
-    const topo = cartesianToTopocentricVelocity(
-      item.ref.velocities.vx,
-      item.ref.velocities.vy,
-      item.ref.velocities.vz,
-      item.ref.lat || 39.0,
-      item.ref.lon || 35.0
-    );
-    return {
-      refId: item.ref.id,
-      refName: item.ref.name,
-      distKm: Number(item.distKm.toFixed(2)),
-      weight: Number(item.weight.toFixed(6)),
-      weightPercent: sumWeight > 0 ? Number(((item.weight / sumWeight) * 100).toFixed(2)) : 0,
-      refVx: item.ref.velocities.vx,
-      refVy: item.ref.velocities.vy,
-      refVz: item.ref.velocities.vz,
-      refVe: item.ref.velocities.ve ?? topo.ve,
-      refVn: item.ref.velocities.vn ?? topo.vn,
-      refVu: item.ref.velocities.vu ?? topo.vu,
-    };
-  });
-}
-
-/**
- * Converts Cartesian ECEF velocities (vx, vy, vz in m/year) to local topocentric velocities (ve, vn, vu in mm/year)
- * based on the station's latitude (latDeg) and longitude (lonDeg).
- */
-export function cartesianToTopocentricVelocity(
-  vx: number,
-  vy: number,
-  vz: number,
-  latDeg: number = 39.0,
-  lonDeg: number = 35.0
-): { ve: number; vn: number; vu: number } {
-  const phi = (latDeg * Math.PI) / 180.0;
-  const lam = (lonDeg * Math.PI) / 180.0;
-
-  const sinPhi = Math.sin(phi);
-  const cosPhi = Math.cos(phi);
-  const sinLam = Math.sin(lam);
-  const cosLam = Math.cos(lam);
-
-  // R_enu * [vx, vy, vz]^T
-  const ve = -sinLam * vx + cosLam * vy;
-  const vn = -sinPhi * cosLam * vx - sinPhi * sinLam * vy + cosPhi * vz;
-  const vu = cosPhi * cosLam * vx + cosPhi * sinLam * vy + sinPhi * vz;
-
-  return {
-    ve: Number((ve * 1000.0).toFixed(2)), // mm/year
-    vn: Number((vn * 1000.0).toFixed(2)), // mm/year
-    vu: Number((vu * 1000.0).toFixed(2)), // mm/year
-  };
-}
-
-/**
- * Converts local topocentric velocities (ve, vn, vu in mm/year) to Cartesian ECEF velocities (vx, vy, vz in m/year)
- * based on the station's latitude (latDeg) and longitude (lonDeg).
- */
-export function topocentricToCartesianVelocity(
-  veMm: number,
-  vnMm: number,
-  vuMm: number,
-  latDeg: number = 39.0,
-  lonDeg: number = 35.0
-): { vx: number; vy: number; vz: number } {
-  const phi = (latDeg * Math.PI) / 180.0;
-  const lam = (lonDeg * Math.PI) / 180.0;
-
-  const sinPhi = Math.sin(phi);
-  const cosPhi = Math.cos(phi);
-  const sinLam = Math.sin(lam);
-  const cosLam = Math.cos(lam);
-
-  const e = veMm / 1000.0;
-  const n = vnMm / 1000.0;
-  const u = vuMm / 1000.0;
-
-  // R_enu^T * [e, n, u]^T
-  const vx = -sinLam * e - sinPhi * cosLam * n + cosPhi * cosLam * u;
-  const vy = cosLam * e - sinPhi * sinLam * n + cosPhi * sinLam * u;
-  const vz = cosPhi * n + sinPhi * u;
-
-  return {
-    vx: Number(vx.toFixed(5)), // m/year
-    vy: Number(vy.toFixed(5)), // m/year
-    vz: Number(vz.toFixed(5)), // m/year
-  };
-}
-
-/**
- * Topcon Tools & GeoCalculator Adım 7:
- * TUSAGA-Aktif Dayanak Noktası Koordinatlarını 2005.00 Referans Epoğundan
- * Ölçü Epoğuna (t) Öteler (Dayalı Dengeleme Öncesi Hazırlık).
- * X_t = X_2005 + Vx * (surveyEpoch - 2005.00)
- */
-export function shiftReferenceStationsToSurveyEpoch(
-  stations: Record<string, Station>,
-  surveyEpoch: number,
-  refEpoch: number = 2005.00
-): Record<string, Station> {
-  const updated = { ...stations };
-  const dt = surveyEpoch - refEpoch;
-
-  for (const id in updated) {
-    const st = updated[id];
-    if (st.isFixed.x || st.type === 'CORS') {
-      const baseRefX = st.refX ?? st.x;
-      const baseRefY = st.refY ?? st.y;
-      const baseRefZ = st.refZ ?? st.z;
-      const x_t = baseRefX + st.velocities.vx * dt;
-      const y_t = baseRefY + st.velocities.vy * dt;
-      const z_t = baseRefZ + st.velocities.vz * dt;
-      const geo = ecefToGeodetic(x_t, y_t, z_t);
-      const tm = geodeticToTM(geo.lat, geo.lon, 30);
-
-      updated[id] = {
-        ...st,
-        x: x_t,
-        y: y_t,
-        z: z_t,
-        lat: geo.lat,
-        lon: geo.lon,
-        h: geo.h,
-        projY: tm.projY,
-        projX: tm.projX,
-      };
-    }
-  }
-
-  return updated;
-}
 
 // ============================================================================
 // EXCEL & REPORT GENERATOR (Kadastro & BÖHYY Standartları)
@@ -2800,9 +2440,7 @@ export function exportAdjustmentToExcel(
     ['Meridyen (DOM)', `${config.dom}°`],
     ['Açı Birimi', config.angleUnit],
     ['Elipsoit', 'GRS80 (a=6378137.0 m, 1/f=298.257222101)'],
-    ['Ölçü Epoğu', config.surveyEpoch.toFixed(2)],
-    ['Referans Epoğu', config.refEpoch.toFixed(2)],
-    ['Dengeleme Modu', adjResult.mode === 'constrained' ? 'Dayalı (CORS Sabit)' : 'Serbest (İç Tutarlılık)'],
+    ['Dengeleme Modu', '3D Serbest Ağ Dengelemesi (İç Tutarlılık / Datum Sabit)'],
     ['Birim Ölçünün Karesel Ort. Hatası (sigma_0)', adjResult.sigma0Aposteriori.toFixed(4)],
     ['Serbestlik Derecesi (DOF)', adjResult.dof],
     ['Kareler Toplamı [vPv]', adjResult.vPv.toFixed(6)],
@@ -2933,327 +2571,9 @@ export function exportAdjustmentToExcel(
   XLSX.writeFile(wb, fileName);
 }
 
-// ============================================================================
-// OFFICIAL VELOCITY CALCULATION & EXCEL EXPORT (BÖHYY & HGM Standards)
-// ============================================================================
 
-/**
- * Generates comprehensive structured velocity and epoch transformation data
- * for all stations conforming to HGM TUSAGA-Aktif & BÖHYY standards.
- */
-export function generateVelocityReportData(
-  stations: Record<string, Station>,
-  surveyEpoch: number = 2024.45,
-  refEpoch: number = 2005.00,
-  domDeg: number = 30
-): VelocityReportItem[] {
-  const stationList = Object.values(stations);
-  const dt = surveyEpoch - refEpoch;
 
-  // Compute TUTGA IDW velocity estimates for all stations
-  const estimates = estimateVelocitiesByTUTGA(stations);
 
-  return stationList.map((st) => {
-    const isFixed = Boolean(st.isFixed.x && st.isFixed.y && st.isFixed.z) || st.type === 'CORS';
-    const status: 'TUSAGA Sabit' | 'TUTGA Enterpolasyon' | 'Kullanıcı Tanımlı' = isFixed
-      ? 'TUSAGA Sabit'
-      : (estimates[st.id] ? 'TUTGA Enterpolasyon' : 'Kullanıcı Tanımlı');
-
-    // 2005.00 Reference coordinates
-    const refX = typeof st.refX === 'number' && !isNaN(st.refX) && st.refX !== 0 ? st.refX : st.x;
-    const refY = typeof st.refY === 'number' && !isNaN(st.refY) && st.refY !== 0 ? st.refY : st.y;
-    const refZ = typeof st.refZ === 'number' && !isNaN(st.refZ) && st.refZ !== 0 ? st.refZ : st.z;
-
-    const refGeo = ecefToGeodetic(refX, refY, refZ);
-    const refTM = geodeticToTM(refGeo.lat, refGeo.lon, domDeg);
-
-    // Velocities
-    const vel = (st.velocities && (st.velocities.vx !== 0 || st.velocities.vy !== 0))
-      ? st.velocities
-      : (estimates[st.id] || { vx: 0, vy: 0, vz: 0 });
-
-    const vx = vel.vx || 0;
-    const vy = vel.vy || 0;
-    const vz = vel.vz || 0;
-
-    const topo = cartesianToTopocentricVelocity(vx, vy, vz, refGeo.lat, refGeo.lon);
-    const ve = typeof vel.ve === 'number' && !isNaN(vel.ve) ? vel.ve : topo.ve;
-    const vn = typeof vel.vn === 'number' && !isNaN(vel.vn) ? vel.vn : topo.vn;
-    const vu = typeof vel.vu === 'number' && !isNaN(vel.vu) ? vel.vu : topo.vu;
-
-    const vHorizontal = Math.sqrt(ve * ve + vn * vn);
-    const v3D = Math.sqrt(ve * ve + vn * vn + vu * vu);
-
-    // Azimuth in Grad [0, 400) and Degree [0, 360)
-    const vAzRad = Math.atan2(ve, vn);
-    const vAzGrad = ((vAzRad * 200.0 / Math.PI) + 400.0) % 400.0;
-    const vAzDeg = ((vAzRad * 180.0 / Math.PI) + 360.0) % 360.0;
-
-    // Survey epoch coordinates
-    const surveyX = refX + vx * dt;
-    const surveyY = refY + vy * dt;
-    const surveyZ = refZ + vz * dt;
-    const surveyGeo = ecefToGeodetic(surveyX, surveyY, surveyZ);
-    const surveyTM = geodeticToTM(surveyGeo.lat, surveyGeo.lon, domDeg);
-
-    // Displacements
-    const dX_m = surveyX - refX;
-    const dY_m = surveyY - refY;
-    const dZ_m = surveyZ - refZ;
-    const dX_mm = dX_m * 1000.0;
-    const dY_mm = dY_m * 1000.0;
-    const dZ_mm = dZ_m * 1000.0;
-    const dSpatial_cm = Math.sqrt(dX_m * dX_m + dY_m * dY_m + dZ_m * dZ_m) * 100.0;
-    const dHorizontal_cm = Math.sqrt(dX_m * dX_m + dY_m * dY_m) * 100.0;
-
-    // Interpolation details if not a fixed reference station
-    const interpolationDetails = !isFixed ? getStationInterpolationDetails(st, stations) : undefined;
-
-    return {
-      id: st.id,
-      name: st.name,
-      type: st.type,
-      isFixed,
-      status,
-      refX,
-      refY,
-      refZ,
-      refLat: refGeo.lat,
-      refLon: refGeo.lon,
-      refH: refGeo.h,
-      refProjY: refTM.projY,
-      refProjX: refTM.projX,
-      vx,
-      vy,
-      vz,
-      ve,
-      vn,
-      vu,
-      vHorizontal: Number(vHorizontal.toFixed(2)),
-      vAzimuthGrad: Number(vAzGrad.toFixed(2)),
-      vAzimuthDeg: Number(vAzDeg.toFixed(2)),
-      v3D: Number(v3D.toFixed(2)),
-      surveyEpoch,
-      refEpoch,
-      dt,
-      surveyX,
-      surveyY,
-      surveyZ,
-      surveyLat: surveyGeo.lat,
-      surveyLon: surveyGeo.lon,
-      surveyH: surveyGeo.h,
-      surveyProjY: surveyTM.projY,
-      surveyProjX: surveyTM.projX,
-      dX_m,
-      dY_m,
-      dZ_m,
-      dX_mm,
-      dY_mm,
-      dZ_mm,
-      dHorizontal_cm: Number(dHorizontal_cm.toFixed(2)),
-      dSpatial_cm: Number(dSpatial_cm.toFixed(2)),
-      interpolationDetails,
-    };
-  });
-}
-
-/**
- * Exports official TUSAGA-Aktif & BÖHYY Velocity Calculation and Epoch Shift Report to Excel (.xlsx)
- * Matching the exact structure of HIZ.png and BÖHYY standards.
- */
-export function exportVelocityReportToExcel(
-  stations: Record<string, Station>,
-  surveyEpoch: number = 2024.45,
-  refEpoch: number = 2005.00,
-  domDeg: number = 30,
-  projectName: string = 'GNSS Hız Hesabı Projesi'
-) {
-  const wb = XLSX.utils.book_new();
-  const items = generateVelocityReportData(stations, surveyEpoch, refEpoch, domDeg);
-  const dt = surveyEpoch - refEpoch;
-
-  // Sheet 1: Hız Hesabı Raporu (HIZ.png standardı)
-  const sheet1Data: any[][] = [
-    ['T.C. HARİTA GENEL MÜDÜRLÜĞÜ & BÖHYY STANDARTLARINDA HIZ HESABI RAPORU', ''],
-    ['Proje Adı', projectName],
-    ['Referans Epoğu (t0)', `${refEpoch.toFixed(2)} (ITRF96 / TUREF)`],
-    ['Ölçü Epoğu (t)', `${surveyEpoch.toFixed(2)}`],
-    ['Epok Farkı (Δt)', `${dt.toFixed(2)} Yıl`],
-    ['Koordinat Sistemi / Elipsoit', `TUREF-TM${domDeg} / GRS80 (DOM: ${domDeg}°)`],
-    ['Rapor Oluşturma Tarihi', new Date().toLocaleString('tr-TR')],
-    [''],
-    [
-      'Nokta No',
-      'Nokta Tipi',
-      'Durum',
-      'X_2005 (m)',
-      'Y_2005 (m)',
-      'Z_2005 (m)',
-      'Enlem B (Derece)',
-      'Boylam L (Derece)',
-      'Elipsoidal H (m)',
-      'Vx (m/yıl)',
-      'Vy (m/yıl)',
-      'Vz (m/yıl)',
-      'Ve (mm/yıl)',
-      'Vn (mm/yıl)',
-      'Vu (mm/yıl)',
-      'V_yatay (mm/yıl)',
-      'Hız Azimutu (Grad)',
-      'V_3D (mm/yıl)',
-      'Hız Belirleme Yöntemi',
-    ],
-  ];
-
-  for (const it of items) {
-    sheet1Data.push([
-      it.name,
-      it.type,
-      it.status,
-      it.refX.toFixed(4),
-      it.refY.toFixed(4),
-      it.refZ.toFixed(4),
-      it.refLat.toFixed(8),
-      it.refLon.toFixed(8),
-      it.refH.toFixed(4),
-      it.vx.toFixed(5),
-      it.vy.toFixed(5),
-      it.vz.toFixed(5),
-      it.ve.toFixed(2),
-      it.vn.toFixed(2),
-      it.vu.toFixed(2),
-      it.vHorizontal.toFixed(2),
-      it.vAzimuthGrad.toFixed(2),
-      it.v3D.toFixed(2),
-      it.isFixed ? 'TUSAGA Resmi Karne' : 'TUTGA IDW Enterpolasyon',
-    ]);
-  }
-
-  const wsSheet1 = XLSX.utils.aoa_to_sheet(sheet1Data);
-  XLSX.utils.book_append_sheet(wb, wsSheet1, 'Hız Hesabı');
-
-  // Sheet 2: Ölçü Epoğu Koordinatları
-  const sheet2Data: any[][] = [
-    ['ÖLÇÜ EPOĞU (t) KOORDİNATLARI VE TEKTONİK DEPLASMANLAR', ''],
-    ['Referans Epok', `${refEpoch.toFixed(2)}`],
-    ['Ölçü Epoğu', `${surveyEpoch.toFixed(2)}`],
-    ['Δt', `${dt.toFixed(2)} Yıl`],
-    [''],
-    [
-      'Nokta No',
-      'Durum',
-      'X(t) (m)',
-      'Y(t) (m)',
-      'Z(t) (m)',
-      'Enlem(t) (Derece)',
-      'Boylam(t) (Derece)',
-      'Elipsoidal H(t) (m)',
-      'TM Sağa Y(t) (m)',
-      'TM Yukarı X(t) (m)',
-      'ΔX (mm)',
-      'ΔY (mm)',
-      'ΔZ (mm)',
-      'Yatay Kayma (cm)',
-      'Toplam 3D Kayma (cm)',
-    ],
-  ];
-
-  for (const it of items) {
-    sheet2Data.push([
-      it.name,
-      it.status,
-      it.surveyX.toFixed(4),
-      it.surveyY.toFixed(4),
-      it.surveyZ.toFixed(4),
-      it.surveyLat.toFixed(8),
-      it.surveyLon.toFixed(8),
-      it.surveyH.toFixed(4),
-      it.surveyProjY.toFixed(4),
-      it.surveyProjX.toFixed(4),
-      it.dX_mm.toFixed(1),
-      it.dY_mm.toFixed(1),
-      it.dZ_mm.toFixed(1),
-      it.dHorizontal_cm.toFixed(2),
-      it.dSpatial_cm.toFixed(2),
-    ]);
-  }
-
-  const wsSheet2 = XLSX.utils.aoa_to_sheet(sheet2Data);
-  XLSX.utils.book_append_sheet(wb, wsSheet2, 'Ölçü Epoğu Koordinatları');
-
-  // Sheet 3: TUTGA IDW Enterpolasyon Detayları
-  const sheet3Data: any[][] = [
-    ['TUTGA TERS UZAKLIK AĞIRLIKLI (IDW) HIZ ENTERPOLASYONU HESAP DÖKÜMÜ', ''],
-    ['Model', 'Ters Uzaklık Karesi (p = 1 / d^2) Ağırlık Fonksiyonu'],
-    [''],
-    [
-      'Hesaplanan Nokta',
-      'Referans CORS İstasyonu',
-      'Mesafe d (km)',
-      'Ağırlık p = 1/d²',
-      'Ağırlık Katkısı (%)',
-      'Ref Vx (m/yıl)',
-      'Ref Vy (m/yıl)',
-      'Ref Vz (m/yıl)',
-      'Ref Ve (mm/yıl)',
-      'Ref Vn (mm/yıl)',
-      'Ref Vu (mm/yıl)',
-    ],
-  ];
-
-  let hasInterp = false;
-  for (const it of items) {
-    if (it.interpolationDetails && it.interpolationDetails.length > 0) {
-      hasInterp = true;
-      for (const d of it.interpolationDetails) {
-        sheet3Data.push([
-          it.name,
-          d.refName,
-          d.distKm.toFixed(2),
-          d.weight.toFixed(6),
-          `${d.weightPercent.toFixed(2)}%`,
-          d.refVx.toFixed(5),
-          d.refVy.toFixed(5),
-          d.refVz.toFixed(5),
-          d.refVe.toFixed(2),
-          d.refVn.toFixed(2),
-          d.refVu.toFixed(2),
-        ]);
-      }
-    }
-  }
-
-  if (!hasInterp) {
-    sheet3Data.push(['Ağda enterpolasyon uygulanan ara nokta bulunmamaktadır.', '', '', '', '', '', '', '', '', '', '']);
-  }
-
-  const wsSheet3 = XLSX.utils.aoa_to_sheet(sheet3Data);
-  XLSX.utils.book_append_sheet(wb, wsSheet3, 'Enterpolasyon Detayları');
-
-  // Sheet 4: Matematiksel Model ve Standartlar
-  const sheet4Data = [
-    ['BÖHYY & HGM TUSAGA-AKTİF HIZ HESABI METODOLOJİSİ', ''],
-    ['Mevzuat', 'Büyük Ölçekli Harita ve Harita Bilgileri Üretim Yönetmeliği (BÖHYY) Madde 20 & 21'],
-    ['Datum', 'TUREF / ITRF96 (Uluslararası Karasal Referans Sistemi)'],
-    ['Referans Epok (t0)', '2005.00'],
-    ['Elipsoit', 'GRS80 (a = 6378137.0 m, 1/f = 298.257222101)'],
-    ['Dönüşüm Matrisi', 'ECEF Kartezyen ve Yerel Toposentrik (Doğu, Kuzey, Yukarı) koordinat dönüşümü:'],
-    ['Ve Formülü', 'Ve = (-sin(λ) * Vx + cos(λ) * Vy) * 1000  (mm/yıl)'],
-    ['Vn Formülü', 'Vn = (-sin(φ)*cos(λ) * Vx - sin(φ)*sin(λ) * Vy + cos(φ) * Vz) * 1000  (mm/yıl)'],
-    ['Vu Formülü', 'Vu = (cos(φ)*cos(λ) * Vx + cos(φ)*sin(λ) * Vy + sin(φ) * Vz) * 1000  (mm/yıl)'],
-    ['Epok Öteleme', 'X(t) = X_2005 + Vx * (t - 2005.00)'],
-    ['Yatay Hız', 'V_yatay = sqrt(Ve^2 + Vn^2)'],
-    ['Hız Azimutu', 'Azimut = atan2(Ve, Vn) [Grad biriminde, 0-400 aralığı]'],
-    ['Enterpolasyon', 'TUTGA Hız Alanı: p_i = 1 / d_i^2 ağırlıklı ortalama yöntemi (IDW)'],
-  ];
-  const wsSheet4 = XLSX.utils.aoa_to_sheet(sheet4Data);
-  XLSX.utils.book_append_sheet(wb, wsSheet4, 'Standartlar ve Metot');
-
-  const fileName = `${projectName.replace(/\s+/g, '_')}_Hiz_Hesabi_Raporu.xlsx`;
-  XLSX.writeFile(wb, fileName);
-}
-
-export const SAMPLE_VELOCITY_STATIONS: Record<string, Station> = {};
 
 
 // ============================================================================
@@ -3275,8 +2595,6 @@ export const DEFAULT_CONFIG: JobConfig = {
   horizontalTolerance: 0.03, // 0.03 m
   verticalTolerance: 0.05, // 0.05 m
   ellipsoid: 'GRS80',
-  refEpoch: 2005.0,
-  surveyEpoch: 2024.45,
   loopToleranceBaseMm: 10.0,
   loopTolerancePpm: 1.0,
   baardaAlpha: 0.001,
@@ -3443,140 +2761,4 @@ export function generateBaselinesFromStations(stations: Record<string, Station>)
   }
 
   return baselines;
-}
-
-export interface FullTopconWorkflowResult {
-  shiftedReferenceCount: number;
-  unconstrainedResult: AdjustmentResult | null;
-  constrainedResult: AdjustmentResult | null;
-  estimatedVelocitiesCount: number;
-  archiveShiftedCount: number;
-  finalStations: Record<string, Station>;
-  baselines: BaselineVector[];
-  loopClosures: LoopClosure[];
-}
-
-/**
- * Topcon Tools & Trimble Business Center End-to-End Automated Pipeline (Adım 1 - 10):
- * 1. Generates / refreshes baseline vectors with NOAA ANTCAL & ARP reductions.
- * 2. Step 7: Shifts TUSAGA reference stations from 2005.00 to Survey Epoch (t).
- * 3. Step 5: Performs 3D Unconstrained (Serbest) Gauss-Markov Adjustment.
- * 4. Step 5: Computes Spanning Tree Cycle Basis Loop Closures.
- * 5. Step 8: Performs 3D Constrained (Dayalı) Gauss-Markov Adjustment + Baarda Snooping.
- * 6. Step 9: Estimates TUTGA tectonic velocities for ground points (IDW Interpolation).
- * 7. Step 10: Shifts adjusted survey-epoch coordinates back to 2005.00 Archive Epoch.
- */
-export function runFullTopconWorkflow(
-  inputStations: Record<string, Station>,
-  inputBaselines: BaselineVector[],
-  config: JobConfig
-): FullTopconWorkflowResult {
-  const stationList = Object.values(inputStations);
-  if (stationList.length < 2) {
-    return {
-      shiftedReferenceCount: 0,
-      unconstrainedResult: null,
-      constrainedResult: null,
-      estimatedVelocitiesCount: 0,
-      archiveShiftedCount: 0,
-      finalStations: inputStations,
-      baselines: inputBaselines,
-      loopClosures: [],
-    };
-  }
-
-  // 1. Ensure baseline network is populated
-  let currentBaselines = inputBaselines.length > 0 ? inputBaselines : generateBaselinesFromStations(inputStations);
-
-  // 2. Step 7: Shift Reference (CORS / TUSAGA) stations to survey epoch (t)
-  const epochShiftedReferenceStations = shiftReferenceStationsToSurveyEpoch(
-    inputStations,
-    config.surveyEpoch,
-    config.refEpoch
-  );
-
-  let shiftedReferenceCount = 0;
-  for (const id in inputStations) {
-    if (inputStations[id].type === 'CORS' || inputStations[id].isFixed.x) {
-      shiftedReferenceCount++;
-    }
-  }
-
-  // 3. Step 5: Run Unconstrained Adjustment
-  const unconstrainedResult = perform3DNetworkAdjustment(
-    epochShiftedReferenceStations,
-    currentBaselines,
-    'unconstrained',
-    config
-  );
-
-  // 4. Step 5: Compute Loop Closures
-  const loopClosures = calculateLoopClosures(
-    epochShiftedReferenceStations,
-    currentBaselines,
-    config.loopToleranceBaseMm,
-    config.loopTolerancePpm
-  );
-
-  // 5. Step 8: Run Constrained Adjustment
-  const constrainedResult = perform3DNetworkAdjustment(
-    epochShiftedReferenceStations,
-    currentBaselines,
-    'constrained',
-    config
-  );
-
-  // Station state after constrained adjustment
-  let adjustedStationsAtSurveyEpoch = constrainedResult
-    ? constrainedResult.stations
-    : (unconstrainedResult ? unconstrainedResult.stations : epochShiftedReferenceStations);
-
-  // 6. Step 9: Estimate Velocities using TUTGA IDW
-  const velocityEstimates = estimateVelocitiesByTUTGA(adjustedStationsAtSurveyEpoch);
-  let estimatedVelocitiesCount = 0;
-
-  const stationsWithVelocities: Record<string, Station> = {};
-  for (const id in adjustedStationsAtSurveyEpoch) {
-    const st = adjustedStationsAtSurveyEpoch[id];
-    const v = velocityEstimates[id] || st.velocities;
-    if (!st.isFixed.x) estimatedVelocitiesCount++;
-    stationsWithVelocities[id] = {
-      ...st,
-      velocities: v,
-    };
-  }
-
-  // 7. Step 10: Shift ground points to 2005.00 Archive Epoch
-  const finalStations: Record<string, Station> = {};
-  let archiveShiftedCount = 0;
-
-  for (const id in stationsWithVelocities) {
-    const st = stationsWithVelocities[id];
-    const shifted = propagateEpoch(st, config.surveyEpoch, config.refEpoch, config.dom);
-    archiveShiftedCount++;
-
-    finalStations[id] = {
-      ...st,
-      // Store archive 2005.00 values
-      adjustedX: shifted.dstX,
-      adjustedY: shifted.dstY,
-      adjustedZ: shifted.dstZ,
-      adjustedLat: shifted.dstLat,
-      adjustedLon: shifted.dstLon,
-      adjustedH: shifted.dstH,
-      adjustedProjY: shifted.dstProjY,
-      adjustedProjX: shifted.dstProjX,
-    };
-  }
-
-  return {
-    shiftedReferenceCount,
-    unconstrainedResult,
-    constrainedResult,
-    estimatedVelocitiesCount,
-    archiveShiftedCount,
-    finalStations,
-    baselines: constrainedResult ? constrainedResult.baselines : currentBaselines,
-    loopClosures,
-  };
 }

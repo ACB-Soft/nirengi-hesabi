@@ -99,7 +99,6 @@ export function parseRinexHeaderMetadata(
   let deltaN = 0;
   let firstObsTime: string | undefined;
   let lastObsTime: string | undefined;
-  let surveyEpoch: number | undefined;
   let intervalSec: number | undefined;
   let leapSeconds: number | undefined;
   const obsTypesBySystem: Record<string, string[]> = {};
@@ -198,7 +197,6 @@ export function parseRinexHeaderMetadata(
           const hr = parts[3] || 0;
           const min = parts[4] || 0;
           const sec = parts[5] || 0;
-          surveyEpoch = computeDecimalYear(y, m, d, hr, min, sec);
           firstObsTime = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')} ${String(hr).padStart(2, '0')}:${String(min).padStart(2, '0')}:${String(Math.floor(sec)).padStart(2, '0')} GPS`;
         }
         break;
@@ -296,7 +294,6 @@ export function parseRinexHeaderMetadata(
     deltaN,
     firstObsTime,
     lastObsTime,
-    surveyEpoch,
     intervalSec,
     leapSeconds,
     obsTypesBySystem,
@@ -552,7 +549,6 @@ export async function parseRinexFile(
 export function createStationFromSummary(
   summary: RinexParsedSummary,
   options: {
-    surveyEpoch?: number;
     dom?: number;
     forcedType?: StationType;
   } = {}
@@ -573,8 +569,6 @@ export function createStationFromSummary(
   const radius = matched ? (matched.radius || 0.08) : 0.08;
   const correctedHeight = calculateCorrectedAntennaHeight('vertical', metadata.deltaH, radius, 0.0);
 
-  const observationEpoch = metadata.surveyEpoch || options.surveyEpoch || 2026.0;
-
   return {
     id: metadata.markerName,
     name: metadata.markerName,
@@ -588,14 +582,6 @@ export function createStationFromSummary(
     h: geodeticApprox.h,
     projY: geodeticApprox.projY,
     projX: geodeticApprox.projX,
-    refX: metadata.approxX,
-    refY: metadata.approxY,
-    refZ: metadata.approxZ,
-    refLat: geodeticApprox.lat,
-    refLon: geodeticApprox.lon,
-    refH: geodeticApprox.h,
-    refProjY: geodeticApprox.projY,
-    refProjX: geodeticApprox.projX,
     antenna: {
       model,
       heightType: 'vertical',
@@ -610,15 +596,6 @@ export function createStationFromSummary(
       calibrationSource: matchResult ? matchResult.source : undefined,
       rawRinexModel: metadata.antennaType || '',
     },
-    velocities: {
-      vx: 0,
-      vy: 0,
-      vz: 0,
-      ve: 0,
-      vn: 0,
-      vu: 0,
-    },
-    observationEpoch,
     observationDateStr: metadata.firstObsTime,
     occupation,
   };

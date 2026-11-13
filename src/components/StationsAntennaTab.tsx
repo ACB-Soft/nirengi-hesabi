@@ -9,17 +9,18 @@
  * - NOAA NGS ANTCAL & IGS20 Mutlak Anten Kalibrasyon Kataloğu
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Station,
+  BaselineVector,
   AntennaHeightType,
   StationType,
-  StationVelocities,
   IgsOrbitInfo,
   IgsSp3File,
   JobConfig,
 } from '../types/gnss';
 import { JobConfigTab } from './JobConfigTab';
+import { QcSkyplotTab } from './QcSkyplotTab';
 import {
   calculateCorrectedAntennaHeight,
   calculateAntennaPhaseCenterHeight,
@@ -30,17 +31,11 @@ import {
   adjustDateStringToTimeZone,
   getIgsProductDetails,
   parseIgsSp3File,
-  TUSAGA_VELOCITY_CATALOG,
-  cartesianToTopocentricVelocity,
-  topocentricToCartesianVelocity,
-  computeStationEpochCoordinates,
+  computeStationCoordinates,
   ecefToGeodetic,
   geodeticToEcef,
   geodeticToTM,
   tmToGeodetic,
-  exportVelocityReportToExcel,
-  generateVelocityReportData,
-  estimateVelocitiesByTUTGA,
 } from '../utils/geodesy';
 import {
   NOAA_ANTCAL_CATALOG,
@@ -77,7 +72,6 @@ import {
   Satellite,
   Download,
   ShieldCheck,
-  TrendingUp,
   Globe2,
   Database,
   Info,
@@ -93,9 +87,10 @@ import {
 
 interface Props {
   stations: Record<string, Station>;
+  baselines?: BaselineVector[];
   dom?: number;
   timeZone?: string;
-  surveyEpoch?: number;
+  elevationMask?: number;
   config?: JobConfig;
   onChangeConfig?: (newConfig: JobConfig) => void;
   onResetConfigDefaults?: () => void;
@@ -103,16 +98,15 @@ interface Props {
   onAddStation: (station: Station) => void;
   onDeleteStation: (id: string) => void;
   onClearAllStations: () => void;
-  onDetectedSurveyEpoch?: (epoch: number, dateStr?: string) => void;
-  onNavigateToQcTab?: (stnId?: string) => void;
   onNavigateTab?: (tab: string) => void;
 }
 
 export const StationsAntennaTab: React.FC<Props> = ({
   stations,
+  baselines = [],
   dom = 30,
   timeZone = 'GMT+03:00',
-  surveyEpoch = 2026.0,
+  elevationMask = 10,
   config,
   onChangeConfig,
   onResetConfigDefaults,
@@ -120,11 +114,22 @@ export const StationsAntennaTab: React.FC<Props> = ({
   onAddStation,
   onDeleteStation,
   onClearAllStations,
-  onDetectedSurveyEpoch,
-  onNavigateToQcTab,
   onNavigateTab,
 }) => {
   const [isConfigOpen, setIsConfigOpen] = useState(false);
+  const [isQcModalOpen, setIsQcModalOpen] = useState(false);
+  const [qcSelectedStationId, setQcSelectedStationId] = useState<string>('');
+
+  useEffect(() => {
+    if (!isQcModalOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsQcModalOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isQcModalOpen]);
   // Sort stations alphabetically by name
   const sortedStations = useMemo(() => {
     return Object.values(stations).sort((a, b) =>
@@ -155,19 +160,6 @@ export const StationsAntennaTab: React.FC<Props> = ({
   const [modalManufacturer, setModalManufacturer] = useState<string>('ALL');
   const [modalCategory, setModalCategory] = useState<string>('ALL');
 
-  // Velocity Modal State
-  const [isVelocityModalOpen, setIsVelocityModalOpen] = useState(false);
-  const [editingVelocityStationId, setEditingVelocityStationId] = useState<string | null>(null);
-  const [tempVx, setTempVx] = useState<number>(-0.015);
-  const [tempVy, setTempVy] = useState<number>(-0.0218);
-  const [tempVz, setTempVz] = useState<number>(0.0084);
-  const [tempVe, setTempVe] = useState<number>(-21.5);
-  const [tempVn, setTempVn] = useState<number>(14.0);
-  const [tempVu, setTempVu] = useState<number>(1.0);
-  const [tempRefX, setTempRefX] = useState<number>(4118542.894);
-  const [tempRefY, setTempRefY] = useState<number>(2505234.321);
-  const [tempRefZ, setTempRefZ] = useState<number>(4082211.543);
-
   // IGS Orbit Product State
   const [loadedSp3File, setLoadedSp3File] = useState<IgsSp3File | null>(null);
 
@@ -182,10 +174,13 @@ export const StationsAntennaTab: React.FC<Props> = ({
 
   const earliestEpochDecimal = useMemo(() => {
     for (const st of sortedStations) {
-      if (st.observationEpoch) return st.observationEpoch;
+      if (st.observationDateStr) {
+        const d = new Date(st.observationDateStr.replace(' GPS', ''));
+        if (!isNaN(d.getTime())) return d.getFullYear() + (d.getMonth() + 1) / 12;
+      }
     }
-    return surveyEpoch;
-  }, [sortedStations, surveyEpoch]);
+    return 2026.0;
+  }, [sortedStations]);
 
   const igsOrbitInfo: IgsOrbitInfo | null = useMemo(() => {
     if (!earliestObsDateStr && !earliestEpochDecimal) return null;
@@ -320,24 +315,16 @@ export const StationsAntennaTab: React.FC<Props> = ({
           saveRinexFileToOpfs(file).catch(() => {});
 
           const finalStation = createStationFromSummary(summary, {
-            surveyEpoch,
             dom,
             forcedType,
           });
 
           onAddStation(finalStation);
 
-          if (finalStation.observationEpoch && onDetectedSurveyEpoch) {
-            onDetectedSurveyEpoch(finalStation.observationEpoch, finalStation.observationDateStr);
-          }
-
           const matched = matchAntennaInNoaaCatalog(finalStation.antenna?.model || '');
-          const epochMsg = finalStation.observationEpoch
-            ? ` [Ölçü Epoğu: t = ${finalStation.observationEpoch.toFixed(2)}]`
-            : '';
 
           setUploadFeedback(
-            `RINEX verisi (${file.name}) aktarıldı: "${finalStation.name}" [${(forcedType || summary.detectedPointType) === 'CORS' ? 'TUSAGA Sabit' : 'Dengelenecek Ara Nokta'}] eklendi.${epochMsg} ${
+            `RINEX verisi (${file.name}) aktarıldı: "${finalStation.name}" [${(forcedType || summary.detectedPointType) === 'CORS' ? 'TUSAGA Sabit' : 'Dengelenecek Ara Nokta'}] eklendi. ${
               matched
                 ? `[Anten: ${matched.displayName}]`
                 : `[Anten: ${finalStation.antenna?.model || '-'}]`
@@ -585,117 +572,7 @@ export const StationsAntennaTab: React.FC<Props> = ({
     e.target.value = '';
   };
 
-  /**
-   * Auto-apply official TUSAGA National Velocities
-   */
-  const handleAutoApplyTusagaVelocities = () => {
-    let count = 0;
-    for (const id in stations) {
-      const st = stations[id];
-      const nameUpper = st.name.toUpperCase().substring(0, 4);
-      const cat = TUSAGA_VELOCITY_CATALOG[nameUpper] || TUSAGA_VELOCITY_CATALOG.DEFAULT;
-      const updatedRaw: Station = {
-        ...st,
-        refX: st.refX ?? st.x,
-        refY: st.refY ?? st.y,
-        refZ: st.refZ ?? st.z,
-        velocities: {
-          vx: cat.vx,
-          vy: cat.vy,
-          vz: cat.vz,
-          ve: cat.ve,
-          vn: cat.vn,
-          vu: cat.vu,
-        },
-      };
-      const computed = computeStationEpochCoordinates(updatedRaw, surveyEpoch, dom);
-      onUpdateStation(computed);
-      count++;
-    }
-    setUploadFeedback(`${count} istasyona resmi TUSAGA-Aktif tektonik plaka hızları (ITRF96 / 2005.00) atandı ve t=${surveyEpoch.toFixed(2)} epoğundaki koordinatları hesaplandı.`);
-  };
 
-  /**
-   * Open Velocity Modal for specific station or all
-   */
-  const handleOpenVelocityModal = (stationId?: string) => {
-    setEditingVelocityStationId(stationId || null);
-    const targetSt = stationId ? stations[stationId] : null;
-    if (targetSt) {
-      const v = targetSt.velocities;
-      setTempVx(v?.vx ?? -0.015);
-      setTempVy(v?.vy ?? -0.0218);
-      setTempVz(v?.vz ?? 0.0084);
-      setTempVe(v?.ve ?? -21.5);
-      setTempVn(v?.vn ?? 14.0);
-      setTempVu(v?.vu ?? 1.0);
-
-      const rx = targetSt.refX ?? targetSt.x ?? 4118542.894;
-      const ry = targetSt.refY ?? targetSt.y ?? 2505234.321;
-      const rz = targetSt.refZ ?? targetSt.z ?? 4082211.543;
-      setTempRefX(rx);
-      setTempRefY(ry);
-      setTempRefZ(rz);
-    } else {
-      setTempVx(-0.015);
-      setTempVy(-0.0218);
-      setTempVz(0.0084);
-      setTempVe(-21.5);
-      setTempVn(14.0);
-      setTempVu(1.0);
-      setTempRefX(4118542.894);
-      setTempRefY(2505234.321);
-      setTempRefZ(4082211.543);
-    }
-    setIsVelocityModalOpen(true);
-  };
-
-  const handleSaveVelocityModal = () => {
-    if (editingVelocityStationId) {
-      const st = stations[editingVelocityStationId];
-      if (st) {
-        const updatedRaw: Station = {
-          ...st,
-          refX: tempRefX,
-          refY: tempRefY,
-          refZ: tempRefZ,
-          velocities: {
-            vx: tempVx,
-            vy: tempVy,
-            vz: tempVz,
-            ve: tempVe,
-            vn: tempVn,
-            vu: tempVu,
-          },
-        };
-        const computed = computeStationEpochCoordinates(updatedRaw, surveyEpoch, dom);
-        onUpdateStation(computed);
-        setUploadFeedback(`"${computed.name}" istasyonunun 2005 epok koordinat ve hızları güncellendi. Dengeleme epoğu (t=${surveyEpoch.toFixed(2)}) koordinatları hesaplandı.`);
-      }
-    } else {
-      // Apply to all CORS / Fixed stations
-      for (const id in stations) {
-        const st = stations[id];
-        if (st.type === 'CORS' || (st.isFixed.x && st.isFixed.y && st.isFixed.z)) {
-          const updatedRaw: Station = {
-            ...st,
-            velocities: {
-              vx: tempVx,
-              vy: tempVy,
-              vz: tempVz,
-              ve: tempVe,
-              vn: tempVn,
-              vu: tempVu,
-            },
-          };
-          const computed = computeStationEpochCoordinates(updatedRaw, surveyEpoch, dom);
-          onUpdateStation(computed);
-        }
-      }
-      setUploadFeedback(`Tüm istasyonların tektonik plaka hızları güncellendi ve t=${surveyEpoch.toFixed(2)} koordinatları hesaplandı.`);
-    }
-    setIsVelocityModalOpen(false);
-  };
 
   const handleOpenAntennaModalForStation = (stId: string) => {
     setAntennaModalStationId(stId);
@@ -757,41 +634,7 @@ export const StationsAntennaTab: React.FC<Props> = ({
     setUploadFeedback(`"${targetSt.name}" noktasına anten kalibrasyonu atandı: ${ant.displayName}`);
   };
 
-  /**
-   * Export Velocity Calculation Report to Excel (.xlsx)
-   */
-  const handleExportVelocityExcel = () => {
-    if (sortedStations.length === 0) {
-      setUploadFeedback('Hız hesabı Excel raporu oluşturmak için en az 1 istasyon bulunmalıdır.');
-      return;
-    }
-    exportVelocityReportToExcel(stations, surveyEpoch, 2005.00, dom, 'TUSAGA_Hiz_Hesabi');
-    setUploadFeedback('T.C. HGM & BÖHYY standartlarında resmi Hız Hesabı Excel Raporu (.xlsx) indirildi.');
-  };
 
-  /**
-   * Auto-interpolate TUTGA IDW velocities for all rover/unknown points
-   */
-  const handleAutoInterpolateRoverVelocities = () => {
-    const estimates = estimateVelocitiesByTUTGA(stations);
-    let count = 0;
-    for (const id in stations) {
-      const st = stations[id];
-      if (!st.isFixed.x && estimates[id]) {
-        const updatedRaw: Station = {
-          ...st,
-          refX: st.refX ?? st.x,
-          refY: st.refY ?? st.y,
-          refZ: st.refZ ?? st.z,
-          velocities: estimates[id],
-        };
-        const computed = computeStationEpochCoordinates(updatedRaw, surveyEpoch, dom);
-        onUpdateStation(computed);
-        count++;
-      }
-    }
-    setUploadFeedback(`${count} adet ara/proje noktasına TUSAGA CORS sabitlerinden ters uzaklık ağırlıklı (TUTGA IDW) hızlar atandı ve epok koordinatları güncellendi.`);
-  };
 
   return (
     <div className="space-y-6">
@@ -810,9 +653,6 @@ export const StationsAntennaTab: React.FC<Props> = ({
                   </h2>
                   <span className="text-[11px] font-semibold bg-sky-100 text-sky-800 px-2.5 py-0.5 rounded-full border border-sky-200">
                     {config.crsSystem} (DOM: {config.dom}°)
-                  </span>
-                  <span className="text-[11px] font-semibold bg-slate-200/80 text-slate-700 px-2 py-0.5 rounded-full">
-                    t = {config.surveyEpoch.toFixed(2)}
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 mt-0.5">
@@ -853,11 +693,26 @@ export const StationsAntennaTab: React.FC<Props> = ({
               İstasyonlar, RINEX ve Gözlem Verileri
             </h2>
             <p className="text-xs text-slate-500 mt-1">
-              Rover ve TUSAGA sabit istasyonlarının RINEX gözlemleri, anten yükseklikleri, epok hızları ve IGS hassas yörünge verileri.
+              Rover ve TUSAGA sabit istasyonlarının RINEX gözlemleri, anten yükseklikleri ve IGS hassas yörünge verileri.
             </p>
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => {
+                if (!qcSelectedStationId || !stations[qcSelectedStationId]) {
+                  setQcSelectedStationId(sortedStations[0]?.id || '');
+                }
+                setIsQcModalOpen(true);
+              }}
+              className="px-3.5 py-2 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-xs transition cursor-pointer flex items-center gap-1.5"
+              title="Oturum görünümü (Occupation View), Skyplot ve SNR Kalite Kontrol penceresini aç"
+            >
+              <Compass className="w-3.5 h-3.5 text-indigo-100" />
+              <span>Kalite Kontrol (QC)</span>
+            </button>
+
             <button
               onClick={() => {
                 setAntennaModalStationId('');
@@ -872,16 +727,6 @@ export const StationsAntennaTab: React.FC<Props> = ({
 
             {sortedStations.length > 0 && (
               <>
-                {onNavigateTab && corsStations.length > 0 && (
-                  <button
-                    onClick={() => onNavigateTab('constrained_adjustment')}
-                    className="px-3 py-2 text-xs font-semibold bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-300 rounded-lg transition cursor-pointer flex items-center gap-1.5"
-                    title="TUSAGA onaylı epok hızları ve dayalı dengeleme menüsüne git"
-                  >
-                    <TrendingUp className="w-3.5 h-3.5 text-purple-600" />
-                    <span>Dayalı Dengeleme &amp; Hızlar &rarr;</span>
-                  </button>
-                )}
 
                 <button
                   onClick={onClearAllStations}
@@ -1190,8 +1035,7 @@ export const StationsAntennaTab: React.FC<Props> = ({
                   const matchedCal = matchResult?.calibration || matchAntennaInNoaaCatalog(st.antenna?.model || '');
 
                   const gpsWeekDayStr = getGpsWeekDay(
-                    st.occupation?.firstEpochDate || st.observationDateStr,
-                    st.observationEpoch
+                    st.occupation?.firstEpochDate || st.observationDateStr
                   );
 
                   return (
@@ -1358,6 +1202,19 @@ export const StationsAntennaTab: React.FC<Props> = ({
                       {/* 12. İşlem */}
                       <td className="py-2.5 px-3 text-center whitespace-nowrap">
                         <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setQcSelectedStationId(st.id);
+                              setIsQcModalOpen(true);
+                            }}
+                            className="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-300 rounded text-[11px] font-bold cursor-pointer flex items-center gap-1 transition"
+                            title="Bu istasyon için Kalite Kontrol (Oturum, Skyplot, SNR) penceresini aç"
+                          >
+                            <Compass className="w-3.5 h-3.5 text-indigo-600" />
+                            <span>QC</span>
+                          </button>
+
                           <button
                             onClick={() => handleOpenEditModal(st)}
                             className="px-2 py-1 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-300 rounded text-[11px] font-bold cursor-pointer flex items-center gap-1 transition"
@@ -1691,388 +1548,6 @@ export const StationsAntennaTab: React.FC<Props> = ({
       )}
 
       {/* ========================================================================= */}
-      {/* 3. TUSAGA 2005 EPOCH VELOCITY MODAL */}
-      {/* ========================================================================= */}
-      {isVelocityModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-xl w-full overflow-hidden animate-in fade-in duration-150">
-            <div className="p-5 border-b border-slate-200 bg-slate-900 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <TrendingUp className="w-5 h-5 text-purple-400" />
-                <div>
-                  <h3 className="font-bold text-base">
-                    TUSAGA-Aktif Onaylı Hız Bilgisi Girişi
-                  </h3>
-                  <p className="text-[11px] text-slate-400">
-                    Resmi istasyon karnesinden alınan 2005.00 epok hızları ($V_x, V_y, V_z$)
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setIsVelocityModalOpen(false)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-6 space-y-4 text-xs">
-              <div className="bg-amber-50 border border-amber-200 p-3 rounded-xl text-amber-900 text-[11px] leading-relaxed flex items-start gap-2">
-                <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                <div>
-                  <strong>BÖHYY & HGM Standartları:</strong> Harita Genel Müdürlüğü (HGM) veya TUSAGA-Aktif resmi portalından indirilen istasyon karnenizde belirtilen kesin onaylı hız bileşenlerini giriniz. Hız düzeltmesi uygulamak istemiyorsanız <strong>"Hızları Sıfırla (V = 0)"</strong> butonunu kullanabilirsiniz.
-                </div>
-              </div>
-
-              {/* Station Selection Dropdown */}
-              <div>
-                <label className="block text-slate-700 font-bold mb-1 text-xs">Hedef İstasyon</label>
-                <select
-                  value={editingVelocityStationId || 'ALL'}
-                  onChange={(e) => {
-                    const val = e.target.value === 'ALL' ? undefined : e.target.value;
-                    handleOpenVelocityModal(val);
-                  }}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white font-semibold"
-                >
-                  <option value="ALL">Tüm İstasyonlara Uygula ({sortedStations.length} Nokta)</option>
-                  {sortedStations.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name} ({s.type === 'CORS' ? 'TUSAGA Sabit' : 'Ara Nokta'})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* 2005.00 Epoch Coordinates Input (for individual station) */}
-              {editingVelocityStationId && (
-                <div className="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
-                  <div className="flex items-center justify-between">
-                    <h4 className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
-                      <ShieldCheck className="w-4 h-4 text-purple-600" />
-                      <span>2005.00 Referans Epok Kartezyen Koordinatları (m)</span>
-                    </h4>
-                    <span className="text-[10px] text-slate-500 font-mono">TUSAGA-Aktif Karnekod</span>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2 font-mono">
-                    <div>
-                      <label className="block text-slate-600 text-[11px] mb-1 font-sans font-semibold">X_2005 (m)</label>
-                      <input
-                        type="number"
-                        step="0.0001"
-                        value={tempRefX}
-                        onChange={(e) => setTempRefX(parseFloat(e.target.value) || 0)}
-                        placeholder="4118542.894"
-                        className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-bold text-xs"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-slate-600 text-[11px] mb-1 font-sans font-semibold">Y_2005 (m)</label>
-                      <input
-                        type="number"
-                        step="0.0001"
-                        value={tempRefY}
-                        onChange={(e) => setTempRefY(parseFloat(e.target.value) || 0)}
-                        placeholder="2505234.321"
-                        className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-bold text-xs"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-slate-600 text-[11px] mb-1 font-sans font-semibold">Z_2005 (m)</label>
-                      <input
-                        type="number"
-                        step="0.0001"
-                        value={tempRefZ}
-                        onChange={(e) => setTempRefZ(parseFloat(e.target.value) || 0)}
-                        placeholder="4082211.543"
-                        className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-bold text-xs"
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Cartesian ECEF Velocities Inputs */}
-              <div className="space-y-3 bg-purple-50/60 p-4 rounded-xl border border-purple-200">
-                <div className="flex items-center justify-between">
-                  <h4 className="font-bold text-purple-950 text-xs">Onaylı Kartezyen ECEF Hızları (m/yıl)</h4>
-                  <span className="text-[10px] text-purple-700 font-mono">X(t) = X_2005 + Vx*(t - 2005.00)</span>
-                </div>
-                <div className="grid grid-cols-3 gap-2 font-mono">
-                  <div>
-                    <label className="block text-slate-600 text-[11px] mb-1 font-sans font-bold">Vx (m/yıl)</label>
-                    <input
-                      type="number"
-                      step="0.0001"
-                      value={tempVx}
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value) || 0;
-                        setTempVx(val);
-                        const targetSt = editingVelocityStationId ? stations[editingVelocityStationId] : null;
-                        const lat = targetSt?.lat || 39.0;
-                        const lon = targetSt?.lon || 35.0;
-                        const topo = cartesianToTopocentricVelocity(val, tempVy, tempVz, lat, lon);
-                        setTempVe(topo.ve);
-                        setTempVn(topo.vn);
-                        setTempVu(topo.vu);
-                      }}
-                      placeholder="0.0000"
-                      className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-bold text-xs"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-slate-600 text-[11px] mb-1 font-sans font-bold">Vy (m/yıl)</label>
-                    <input
-                      type="number"
-                      step="0.0001"
-                      value={tempVy}
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value) || 0;
-                        setTempVy(val);
-                        const targetSt = editingVelocityStationId ? stations[editingVelocityStationId] : null;
-                        const lat = targetSt?.lat || 39.0;
-                        const lon = targetSt?.lon || 35.0;
-                        const topo = cartesianToTopocentricVelocity(tempVx, val, tempVz, lat, lon);
-                        setTempVe(topo.ve);
-                        setTempVn(topo.vn);
-                        setTempVu(topo.vu);
-                      }}
-                      placeholder="0.0000"
-                      className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-bold text-xs"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-slate-600 text-[11px] mb-1 font-sans font-bold">Vz (m/yıl)</label>
-                    <input
-                      type="number"
-                      step="0.0001"
-                      value={tempVz}
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value) || 0;
-                        setTempVz(val);
-                        const targetSt = editingVelocityStationId ? stations[editingVelocityStationId] : null;
-                        const lat = targetSt?.lat || 39.0;
-                        const lon = targetSt?.lon || 35.0;
-                        const topo = cartesianToTopocentricVelocity(tempVx, tempVy, val, lat, lon);
-                        setTempVe(topo.ve);
-                        setTempVn(topo.vn);
-                        setTempVu(topo.vu);
-                      }}
-                      placeholder="0.0000"
-                      className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white font-bold text-xs"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Topocentric Velocities Inputs */}
-              <div className="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
-                <div className="flex items-center justify-between">
-                  <h4 className="font-bold text-slate-800 text-xs">Yerel Toposentrik Hızlar (mm/yıl)</h4>
-                  <span className="text-[10px] text-slate-500 font-mono">Ve, Vn, Vu (mm/yıl)</span>
-                </div>
-                <div className="grid grid-cols-3 gap-2 font-mono">
-                  <div>
-                    <label className="block text-slate-600 text-[11px] mb-1 font-sans">Ve (Doğu - mm/yıl)</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={tempVe}
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value) || 0;
-                        setTempVe(val);
-                        const targetSt = editingVelocityStationId ? stations[editingVelocityStationId] : null;
-                        const lat = targetSt?.lat || 39.0;
-                        const lon = targetSt?.lon || 35.0;
-                        const cart = topocentricToCartesianVelocity(val, tempVn, tempVu, lat, lon);
-                        setTempVx(cart.vx);
-                        setTempVy(cart.vy);
-                        setTempVz(cart.vz);
-                      }}
-                      placeholder="0.0"
-                      className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white text-xs"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-slate-600 text-[11px] mb-1 font-sans">Vn (Kuzey - mm/yıl)</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={tempVn}
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value) || 0;
-                        setTempVn(val);
-                        const targetSt = editingVelocityStationId ? stations[editingVelocityStationId] : null;
-                        const lat = targetSt?.lat || 39.0;
-                        const lon = targetSt?.lon || 35.0;
-                        const cart = topocentricToCartesianVelocity(tempVe, val, tempVu, lat, lon);
-                        setTempVx(cart.vx);
-                        setTempVy(cart.vy);
-                        setTempVz(cart.vz);
-                      }}
-                      placeholder="0.0"
-                      className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white text-xs"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-slate-600 text-[11px] mb-1 font-sans">Vu (Düşey - mm/yıl)</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={tempVu}
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value) || 0;
-                        setTempVu(val);
-                        const targetSt = editingVelocityStationId ? stations[editingVelocityStationId] : null;
-                        const lat = targetSt?.lat || 39.0;
-                        const lon = targetSt?.lon || 35.0;
-                        const cart = topocentricToCartesianVelocity(tempVe, tempVn, val, lat, lon);
-                        setTempVx(cart.vx);
-                        setTempVy(cart.vy);
-                        setTempVz(cart.vz);
-                      }}
-                      placeholder="0.0"
-                      className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white text-xs"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Real-time Calculation Preview Box */}
-              {(() => {
-                const dt = surveyEpoch - 2005.00;
-                const calcX = tempRefX + tempVx * dt;
-                const calcY = tempRefY + tempVy * dt;
-                const calcZ = tempRefZ + tempVz * dt;
-                const dShiftMm = Math.sqrt(
-                  Math.pow(tempVx * dt * 1000, 2) +
-                  Math.pow(tempVy * dt * 1000, 2) +
-                  Math.pow(tempVz * dt * 1000, 2)
-                );
-                const geo = ecefToGeodetic(calcX, calcY, calcZ);
-                const tm = geodeticToTM(geo.lat, geo.lon, dom);
-
-                return (
-                  <div className="p-3.5 bg-emerald-50 rounded-xl border border-emerald-200 text-xs space-y-2">
-                    <div className="flex items-center justify-between text-emerald-900 font-bold">
-                      <span className="flex items-center gap-1.5">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                        <span>Dengeleme Epoğundaki (t = {surveyEpoch.toFixed(2)}) Canlı Hesaplanan Koordinatlar:</span>
-                      </span>
-                      <span className="px-2 py-0.5 rounded bg-emerald-200/80 text-emerald-950 font-mono text-[10px]">
-                        Δt = {dt.toFixed(2)} Yıl | Toplam Kayma: {(dShiftMm / 10).toFixed(1)} cm
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-3 gap-2 font-mono text-[11px] pt-1">
-                      <div className="bg-white p-2 rounded border border-emerald-200">
-                        <span className="text-slate-500 block text-[10px]">X(t):</span>
-                        <strong className="text-slate-900">{calcX.toFixed(4)} m</strong>
-                      </div>
-                      <div className="bg-white p-2 rounded border border-emerald-200">
-                        <span className="text-slate-500 block text-[10px]">Y(t):</span>
-                        <strong className="text-slate-900">{calcY.toFixed(4)} m</strong>
-                      </div>
-                      <div className="bg-white p-2 rounded border border-emerald-200">
-                        <span className="text-slate-500 block text-[10px]">Z(t):</span>
-                        <strong className="text-slate-900">{calcZ.toFixed(4)} m</strong>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-3 gap-2 font-mono text-[11px]">
-                      <div className="bg-white p-2 rounded border border-emerald-200">
-                        <span className="text-slate-500 block text-[10px]">TM Sağa Y:</span>
-                        <strong className="text-sky-800">{tm.projY.toFixed(4)} m</strong>
-                      </div>
-                      <div className="bg-white p-2 rounded border border-emerald-200">
-                        <span className="text-slate-500 block text-[10px]">TM Yukarı X:</span>
-                        <strong className="text-sky-800">{tm.projX.toFixed(4)} m</strong>
-                      </div>
-                      <div className="bg-white p-2 rounded border border-emerald-200">
-                        <span className="text-slate-500 block text-[10px]">Elipsoidal Kot h:</span>
-                        <strong className="text-emerald-800">{geo.h.toFixed(4)} m</strong>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* Quick Preset Buttons */}
-              <div className="flex items-center justify-between gap-2 pt-1 flex-wrap">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setTempVx(0);
-                    setTempVy(0);
-                    setTempVz(0);
-                    setTempVe(0);
-                    setTempVn(0);
-                    setTempVu(0);
-                  }}
-                  className="px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-100 text-slate-700 font-semibold text-[11px] cursor-pointer"
-                >
-                  Sıfırla (Hız Etkisi Yok: V = 0)
-                </button>
-
-                <div className="flex items-center gap-2 flex-wrap">
-                  <button
-                    type="button"
-                    onClick={handleAutoInterpolateRoverVelocities}
-                    className="px-3 py-1.5 rounded-lg border border-indigo-300 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 font-semibold text-[11px] cursor-pointer inline-flex items-center gap-1"
-                    title="CORS noktalarından ters uzaklık ağırlıklı (IDW) hız enterpolasyonu yap"
-                  >
-                    <TrendingUp className="w-3.5 h-3.5 text-indigo-700" />
-                    <span>TUTGA IDW Hız Enterpolasyonu Yap</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleAutoApplyTusagaVelocities();
-                      setIsVelocityModalOpen(false);
-                    }}
-                    className="px-3 py-1.5 rounded-lg border border-purple-300 bg-purple-50 hover:bg-purple-100 text-purple-900 font-semibold text-[11px] cursor-pointer inline-flex items-center gap-1"
-                    title="HGM TUSAGA-Aktif resmi hız kataloğundan doldur"
-                  >
-                    <Database className="w-3.5 h-3.5 text-purple-700" />
-                    <span>TUSAGA Hız Kataloğunu Uygula</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-2">
-              <button
-                type="button"
-                onClick={handleExportVelocityExcel}
-                className="px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition cursor-pointer flex items-center gap-1.5"
-                title="Hız hesabı raporunu Excel olarak indir"
-              >
-                <FileSpreadsheet className="w-4 h-4" />
-                <span>Hız Hesabı Excel (.xlsx) İndir</span>
-              </button>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsVelocityModalOpen(false)}
-                  className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 font-semibold cursor-pointer text-xs"
-                >
-                  İptal
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSaveVelocityModal}
-                  className="px-5 py-2 rounded-lg bg-purple-700 hover:bg-purple-800 text-white font-bold shadow-sm transition cursor-pointer flex items-center gap-1.5 text-xs"
-                >
-                  <Save className="w-4 h-4" />
-                  <span>Onaylı Hızları Kaydet</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
       {/* 4. NOAA ANTCAL SELECTION MODAL */}
       {/* ========================================================================= */}
       {isAntennaModalOpen && (
@@ -2245,6 +1720,67 @@ export const StationsAntennaTab: React.FC<Props> = ({
               >
                 Kapat
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 5. KALİTE KONTROL (QC) & GNSS GÖRÜNTÜLEME MODAL PENCERESİ */}
+      {/* ========================================================================= */}
+      {isQcModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/65 backdrop-blur-xs p-3 sm:p-5"
+          onClick={() => setIsQcModalOpen(false)}
+        >
+          <div
+            className="bg-slate-50 rounded-2xl shadow-2xl max-w-7xl w-full max-h-[92vh] flex flex-col overflow-hidden border border-slate-200 animate-in fade-in duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="px-5 py-4 border-b border-slate-800 bg-slate-900 text-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-indigo-600/30 border border-indigo-400/40 flex items-center justify-center shrink-0">
+                  <Compass className="w-5 h-5 text-indigo-300" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="font-bold text-sm sm:text-base text-white">
+                      Kalite Kontrol (QC) &amp; GNSS Görüntüleme Pencereleri
+                    </h3>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30">
+                      Topcon Tools Standart
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Oturum zaman çizelgeleri (Occupation View), kutupsal gökyüzü görünürlüğü (Skyplot) ve SNR analizleri
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsQcModalOpen(false)}
+                className="text-slate-300 hover:text-white px-2.5 py-1.5 rounded-lg hover:bg-slate-800 cursor-pointer flex items-center gap-1.5 text-xs font-semibold transition"
+                title="Kapat (Esc)"
+              >
+                <X className="w-4 h-4" />
+                <span className="hidden sm:inline">Kapat</span>
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-4 sm:p-5 overflow-y-auto flex-1 custom-scrollbar">
+              <QcSkyplotTab
+                stations={stations}
+                baselines={baselines}
+                timeZone={timeZone}
+                elevationMask={elevationMask}
+                selectedStationId={qcSelectedStationId}
+                onSelectStation={setQcSelectedStationId}
+                onOpenRinexModal={() => setIsQcModalOpen(false)}
+                isModal={true}
+              />
             </div>
           </div>
         </div>
