@@ -1151,7 +1151,6 @@ export function parseRinexOccupationData(
               timestamp: timeStamp,
               satellites: satsInEpoch,
               nsats: satsInEpoch.length,
-              pdop: Number((1.2 + Math.random() * 0.4).toFixed(1)),
             });
             continue;
           }
@@ -1198,8 +1197,8 @@ export function parseRinexOccupationData(
                     system: info.system,
                     prn: info.prn,
                     epochs: [],
-                    snrSum: 43,
-                    snrCount: 1,
+                    snrSum: 0,
+                    snrCount: 0,
                   });
                 }
                 satMap.get(satKey)?.epochs.push(relSec);
@@ -1222,7 +1221,6 @@ export function parseRinexOccupationData(
             timestamp: timeStamp,
             satellites: satsInEpoch,
             nsats: satsInEpoch.length,
-            pdop: Number((1.3 + Math.random() * 0.4).toFixed(1)),
           });
 
           // Skip observation data lines until next epoch
@@ -1237,10 +1235,9 @@ export function parseRinexOccupationData(
   // Infer real interval if multiple epochs parsed
   if (allEpochRecords.length >= 2 && (!intervalSec || intervalSec === 30)) {
     const diff = allEpochRecords[1].timeSec - allEpochRecords[0].timeSec;
-    if (diff > 0 && diff <= 60) intervalSec = diff;
+    if (diff > 0 && diff <= 300) intervalSec = diff;
   }
 
-  // Sample epoch records if very large (to ensure smooth DOM performance)
   let epochRecords: EpochRecord[] = allEpochRecords;
   if (allEpochRecords.length > 300) {
     const step = Math.ceil(allEpochRecords.length / 300);
@@ -1250,87 +1247,12 @@ export function parseRinexOccupationData(
     }
   }
 
-  // Check if real session data was extracted
-  const hasRealData = allEpochRecords.length >= 2 && satMap.size >= 3;
-
-  let finalTotalEpochs = allEpochRecords.length;
-  let durationSec = lastSec !== null && firstSec !== null && lastSec > firstSec ? lastSec - firstSec : 7200; // default 2 hours
-
-  if (hasRealData && durationSec === 0 && finalTotalEpochs > 1) {
+  const finalTotalEpochs = allEpochRecords.length;
+  let durationSec = lastSec !== null && firstSec !== null && lastSec > firstSec ? lastSec - firstSec : 0;
+  if (durationSec === 0 && finalTotalEpochs > 1) {
     durationSec = (finalTotalEpochs - 1) * intervalSec;
   }
 
-  if (!hasRealData) {
-    const syntheticSats = [
-      { satId: 'G01', system: 'GPS' as GnssConstellation, prn: 1, start: 0, end: 7200, snr: 45, elev: 68 },
-      { satId: 'G03', system: 'GPS' as GnssConstellation, prn: 3, start: 0, end: 5400, snr: 42, elev: 48 },
-      { satId: 'G08', system: 'GPS' as GnssConstellation, prn: 8, start: 900, end: 7200, snr: 44, elev: 59 },
-      { satId: 'G11', system: 'GPS' as GnssConstellation, prn: 11, start: 0, end: 7200, snr: 47, elev: 74 },
-      { satId: 'G14', system: 'GPS' as GnssConstellation, prn: 14, start: 0, end: 4200, snr: 39, elev: 32 },
-      { satId: 'G17', system: 'GPS' as GnssConstellation, prn: 17, start: 1800, end: 7200, snr: 46, elev: 62 },
-      { satId: 'G22', system: 'GPS' as GnssConstellation, prn: 22, start: 0, end: 6600, snr: 43, elev: 51 },
-      { satId: 'G28', system: 'GPS' as GnssConstellation, prn: 28, start: 2400, end: 7200, snr: 41, elev: 44 },
-      { satId: 'G30', system: 'GPS' as GnssConstellation, prn: 30, start: 0, end: 7200, snr: 48, elev: 81 },
-      { satId: 'R01', system: 'GLONASS' as GnssConstellation, prn: 1, start: 0, end: 7200, snr: 42, elev: 55 },
-      { satId: 'R02', system: 'GLONASS' as GnssConstellation, prn: 2, start: 600, end: 7200, snr: 40, elev: 42 },
-      { satId: 'R08', system: 'GLONASS' as GnssConstellation, prn: 8, start: 0, end: 5100, snr: 44, elev: 61 },
-      { satId: 'R14', system: 'GLONASS' as GnssConstellation, prn: 14, start: 1200, end: 7200, snr: 41, elev: 49 },
-      { satId: 'R22', system: 'GLONASS' as GnssConstellation, prn: 22, start: 0, end: 7200, snr: 43, elev: 57 },
-      { satId: 'E05', system: 'Galileo' as GnssConstellation, prn: 5, start: 0, end: 7200, snr: 46, elev: 70 },
-      { satId: 'E11', system: 'Galileo' as GnssConstellation, prn: 11, start: 1500, end: 7200, snr: 45, elev: 65 },
-      { satId: 'E24', system: 'Galileo' as GnssConstellation, prn: 24, start: 0, end: 6000, snr: 42, elev: 45 },
-      { satId: 'C06', system: 'BeiDou' as GnssConstellation, prn: 6, start: 0, end: 7200, snr: 43, elev: 52 },
-      { satId: 'C11', system: 'BeiDou' as GnssConstellation, prn: 11, start: 1800, end: 7200, snr: 44, elev: 58 },
-      { satId: 'C14', system: 'BeiDou' as GnssConstellation, prn: 14, start: 0, end: 7200, snr: 41, elev: 46 },
-    ];
-
-    const baseYear = surveyEpochDecimal ? Math.floor(surveyEpochDecimal) : 2025;
-    const baseDate = firstEpochDateStr || `${baseYear}-06-15 09:00:00`;
-    firstDateStr = baseDate;
-    lastDateStr = `${baseYear}-06-15 11:00:00`;
-    durationSec = 7200;
-    intervalSec = 30;
-    finalTotalEpochs = 240;
-
-    epochRecords.length = 0;
-    satMap.clear();
-
-    for (let t = 0; t <= durationSec; t += intervalSec) {
-      const activeSatIds: string[] = [];
-      for (const s of syntheticSats) {
-        if (t >= s.start && t <= s.end) {
-          activeSatIds.push(s.satId);
-          if (!satMap.has(s.satId)) {
-            satMap.set(s.satId, {
-              system: s.system,
-              prn: s.prn,
-              epochs: [],
-              snrSum: s.snr,
-              snrCount: 1,
-            });
-          }
-          satMap.get(s.satId)?.epochs.push(t);
-        }
-      }
-
-      const epMin = Math.floor(t / 60);
-      const epSec = t % 60;
-      const hh = String(9 + Math.floor(epMin / 60)).padStart(2, '0');
-      const mm = String(epMin % 60).padStart(2, '0');
-      const ss = String(epSec).padStart(2, '0');
-
-      epochRecords.push({
-        epochIndex: epochRecords.length,
-        timeSec: t,
-        timestamp: `${baseYear}-06-15 ${hh}:${mm}:${ss}`,
-        satellites: activeSatIds,
-        nsats: activeSatIds.length,
-        pdop: Number((1.3 + Math.sin(t / 1000) * 0.3).toFixed(1)),
-      });
-    }
-  }
-
-  // Construct SatelliteTrack objects
   const satTracks: SatelliteTrack[] = [];
   const foundConstellations = new Set<GnssConstellation>();
 
@@ -1340,7 +1262,6 @@ export function parseRinexOccupationData(
     const startSec = sortedEpochs[0] || 0;
     const endSec = sortedEpochs[sortedEpochs.length - 1] || durationSec;
 
-    // Build contiguous timeSlots
     const timeSlots: Array<{ startSec: number; endSec: number; avgSnr?: number }> = [];
     let slotStart = startSec;
     let prev = startSec;
@@ -1348,12 +1269,12 @@ export function parseRinexOccupationData(
     for (let k = 1; k < sortedEpochs.length; k++) {
       const cur = sortedEpochs[k];
       if (cur - prev > intervalSec * 2.5) {
-        timeSlots.push({ startSec: slotStart, endSec: prev, avgSnr: 44 });
+        timeSlots.push({ startSec: slotStart, endSec: prev });
         slotStart = cur;
       }
       prev = cur;
     }
-    timeSlots.push({ startSec: slotStart, endSec: prev, avgSnr: 44 });
+    timeSlots.push({ startSec: slotStart, endSec: prev });
 
     satTracks.push({
       satId,
@@ -1364,13 +1285,10 @@ export function parseRinexOccupationData(
       startSec,
       endSec,
       timeSlots,
-      avgElevation: Math.min(85, Math.max(15, 30 + (data.prn * 7) % 55)),
-      avgSnr: Number((40 + (data.prn * 3) % 10).toFixed(1)),
-      freqs: ['L1', 'L2', 'L5'],
+      freqs: obsTypes.filter((t) => /^[CLDS]1|^L1|^C1/i.test(t)).length > 0 ? ['L1', 'L2'] : ['L1'],
     });
   });
 
-  // Sort satellites logically: GPS (G01..), GLONASS (R01..), Galileo (E01..), BeiDou (C01..)
   const systemPriority: Record<GnssConstellation, number> = {
     GPS: 1,
     GLONASS: 2,
@@ -1505,7 +1423,6 @@ export function findTriangularLoops(
   const nodes = Object.keys(stations);
   if (nodes.length < 3) return [];
 
-  // Build an adjacency lookup matrix
   const connected = new Set<string>();
   for (const b of activeBaselines) {
     connected.add(`${b.fromId}___${b.toId}`);
@@ -1515,20 +1432,6 @@ export function findTriangularLoops(
   const triangles: string[][] = [];
   const addedTriplets = new Set<string>();
 
-  // Find all unique triplets {n1, n2, n3}
-  for (let i = 0; i < nodes.length; i++) {
-    const n1 = nodes[i];
-    for (let j = i + 1; j < nodes.length; j++) {
-      const n2 = nodes[j];
-      if (!connected.add(`${n1}___${n2}`)) {
-        // already existed, which means they are connected!
-        // connected.add returns false if we use a Set we already had.
-        // Let's use simple .has check instead to be extremely safe.
-      }
-    }
-  }
-
-  // Safe adjacency check
   for (let i = 0; i < nodes.length; i++) {
     const n1 = nodes[i];
     for (let j = i + 1; j < nodes.length; j++) {
@@ -1552,6 +1455,88 @@ export function findTriangularLoops(
 }
 
 /**
+ * Fallback Spanning Tree Fundamental Cycle Basis when the network has >= 4-edge polygons without triangles.
+ */
+export function findFundamentalCycles(
+  stations: Record<string, Station>,
+  baselines: BaselineVector[]
+): string[][] {
+  const activeBaselines = baselines.filter((b) => !b.excluded);
+  const nodes = Object.keys(stations);
+  if (nodes.length < 3) return [];
+
+  const adj: Record<string, string[]> = {};
+  for (const n of nodes) adj[n] = [];
+  for (const b of activeBaselines) {
+    if (b.fromId in adj && b.toId in adj) {
+      if (!adj[b.fromId].includes(b.toId)) adj[b.fromId].push(b.toId);
+      if (!adj[b.toId].includes(b.fromId)) adj[b.toId].push(b.fromId);
+    }
+  }
+
+  const visited = new Set<string>();
+  const parent: Record<string, string | null> = {};
+  const depth: Record<string, number> = {};
+  const treeEdges = new Set<string>();
+  const cycles: string[][] = [];
+
+  for (const startNode of nodes) {
+    if (visited.has(startNode)) continue;
+    visited.add(startNode);
+    parent[startNode] = null;
+    depth[startNode] = 0;
+    const queue = [startNode];
+
+    while (queue.length > 0) {
+      const u = queue.shift()!;
+      for (const v of adj[u]) {
+        if (!visited.has(v)) {
+          visited.add(v);
+          parent[v] = u;
+          depth[v] = depth[u] + 1;
+          treeEdges.add([u, v].sort().join('___'));
+          queue.push(v);
+        }
+      }
+    }
+  }
+
+  const seenChords = new Set<string>();
+  for (const b of activeBaselines) {
+    const key = [b.fromId, b.toId].sort().join('___');
+    if (treeEdges.has(key) || seenChords.has(key)) continue;
+    seenChords.add(key);
+
+    // Reconstruct shortest path between b.fromId and b.toId along BFS tree
+    const pathU: string[] = [];
+    const pathV: string[] = [];
+    let u: string | null = b.fromId;
+    let v: string | null = b.toId;
+
+    while (u && v && depth[u] > depth[v]) {
+      pathU.push(u);
+      u = parent[u];
+    }
+    while (u && v && depth[v] > depth[u]) {
+      pathV.push(v);
+      v = parent[v];
+    }
+    while (u && v && u !== v) {
+      pathU.push(u);
+      pathV.push(v);
+      u = parent[u];
+      v = parent[v];
+    }
+    if (u) {
+      const cycle = [...pathU, u, ...pathV.reverse()];
+      if (cycle.length >= 3) cycles.push(cycle);
+    }
+  }
+
+  return cycles;
+}
+
+/**
  * Computes Vectorial Loop Closures (Döngü Kapanış Analizörü)
  * Misclosure: w = sqrt(sum_dX^2 + sum_dY^2 + sum_dZ^2)
  * Tolerance: T = baseMm + ppm * (LengthKm)
@@ -1562,7 +1547,10 @@ export function calculateLoopClosures(
   toleranceBaseMm: number = 10.0,
   tolerancePpm: number = 1.0
 ): LoopClosure[] {
-  const cycles = findTriangularLoops(stations, baselines);
+  let cycles = findTriangularLoops(stations, baselines);
+  if (cycles.length === 0) {
+    cycles = findFundamentalCycles(stations, baselines);
+  }
   const activeBaselines = baselines.filter((b) => !b.excluded);
   const results: LoopClosure[] = [];
 
@@ -1806,12 +1794,12 @@ function invert3x3(m: [
 }
 
 /**
- * Performs 3D Gauss-Markov Network Adjustment
- * Supports:
- * - Unconstrained (Serbest Dengeleme): 1 station fixed
- * - Constrained (Dayalı Dengeleme): All designated CORS stations fixed
- * - Baarda Data Snooping (w-test) outlier detection
- * - 2D/3D Error Ellipses (a, b, theta, sigma_h at 95% confidence)
+ * Performs 3D Gauss-Markov Inner-Constraint Free Network Adjustment (İz Minimizasyonu / Moore-Penrose N+)
+ * - All stations are estimated parameters (fixedStationIds = [], rank defect d = 3 translation)
+ * - Enforces centroid zero-translation datum constraints G^T dX = 0 via bordered normal matrix
+ * - Exact Gauss-Jordan inversion on full-rank (3n+3) bordered system (no Tikhonov bias)
+ * - Rigorous Baarda Data Snooping (w-test) with exact Q_vv = Q_k - A_k N+ A_k^T
+ * - Error ellipsoids (a, b, c, theta, sigma_h at 95% confidence) for all stations
  */
 export function perform3DNetworkAdjustment(
   inputStations: Record<string, Station>,
@@ -1821,60 +1809,75 @@ export function perform3DNetworkAdjustment(
 ): AdjustmentResult | null {
   try {
     const stationKeys = Object.keys(inputStations);
-    if (stationKeys.length < 2) return null;
+    const nStn = stationKeys.length;
+    if (nStn < 2) return null;
 
-    // Prune baselines: only keep those where both endpoints exist in inputStations
-    let activeBaselines = inputBaselines.filter(
+    // Require genuine solved baselines (zero synthetic baseline generation fallback)
+    const activeBaselines = inputBaselines.filter(
       (b) => !b.excluded && b.fromId in inputStations && b.toId in inputStations
     );
-    if (activeBaselines.length === 0) {
-      activeBaselines = generateBaselinesFromStations(inputStations);
-    }
     if (activeBaselines.length < 1) return null;
 
-    // Free Network Adjustment: exactly 1 datum station is fixed
-    const fixedStationIds: string[] = [];
-    const unknownStationIds: string[] = [];
-
-    const corsStn = stationKeys.find((id) => inputStations[id].type === 'CORS' || inputStations[id].isFixed.x) || stationKeys[0];
-    fixedStationIds.push(corsStn);
-    for (const id of stationKeys) {
-      if (id !== corsStn) unknownStationIds.push(id);
+    // Verify graph connectivity across all stations via BFS
+    const visitedConn = new Set<string>([stationKeys[0]]);
+    const connQueue = [stationKeys[0]];
+    while (connQueue.length > 0) {
+      const curr = connQueue.shift()!;
+      for (const b of activeBaselines) {
+        if (b.fromId === curr && !visitedConn.has(b.toId)) {
+          visitedConn.add(b.toId);
+          connQueue.push(b.toId);
+        } else if (b.toId === curr && !visitedConn.has(b.fromId)) {
+          visitedConn.add(b.fromId);
+          connQueue.push(b.fromId);
+        }
+      }
+    }
+    if (visitedConn.size !== nStn) {
+      console.warn(`Disconnected baseline network: ${visitedConn.size}/${nStn} stations connected.`);
+      return null;
     }
 
-    const uCount = unknownStationIds.length;
-    if (uCount === 0) return null;
-
-    // Total unknowns = 3 * uCount (dX, dY, dZ for each unknown station)
-    const numUnknowns = 3 * uCount;
-    // Total observations = 3 * m (dX, dY, dZ for each baseline)
+    // Inner-Constraint Free Network: ALL stations are unknowns; rank defect = 3 (translation only in 3D ECEF deltas)
+    const fixedStationIds: string[] = [];
+    const unknownStationIds: string[] = [...stationKeys];
+    const numUnknowns = 3 * nStn;
     const numObs = 3 * activeBaselines.length;
 
-    const dof = numObs - numUnknowns;
+    // DOF = 3*m - (3*n - 3) = 3*m - 3*n + 3
+    const dof = numObs - (numUnknowns - 3);
     const effectiveDof = Math.max(1, dof);
 
-    // Map station ID to unknown index: 0, 1, ..., uCount-1
     const unknownIndexMap: Record<string, number> = {};
-    for (let i = 0; i < uCount; i++) {
+    for (let i = 0; i < nStn; i++) {
       unknownIndexMap[unknownStationIds[i]] = i;
     }
 
-    // Initialize coordinates directly from station coordinates without epoch or velocity shifting
+    // Initialize coordinates
     const currentCoords: Record<string, { x: number; y: number; z: number }> = {};
+    let seedStn: string | null = null;
     for (const id of stationKeys) {
       const st = inputStations[id];
-      currentCoords[id] = {
-        x: Number(st.x) || 0,
-        y: Number(st.y) || 0,
-        z: Number(st.z) || 0,
-      };
+      const x = Number(st.x) || 0;
+      const y = Number(st.y) || 0;
+      const z = Number(st.z) || 0;
+      currentCoords[id] = { x, y, z };
+      if (!seedStn && (x !== 0 || y !== 0 || z !== 0)) {
+        seedStn = id;
+      }
+    }
+    if (!seedStn) {
+      // At least one station must have geocentric approx/SPP coordinates so GRS80/TM exists
+      return null;
     }
 
-    // If any station has (0, 0, 0) coordinates, propagate along baseline spanning tree from datum point
-    const hasZeroCoords = stationKeys.some((id) => currentCoords[id].x === 0 && currentCoords[id].y === 0 && currentCoords[id].z === 0);
+    // Propagate coordinates along baseline spanning tree for any station with (0,0,0)
+    const hasZeroCoords = stationKeys.some(
+      (id) => currentCoords[id].x === 0 && currentCoords[id].y === 0 && currentCoords[id].z === 0
+    );
     if (hasZeroCoords) {
-      const queue = [corsStn];
-      const visited = new Set<string>([corsStn]);
+      const queue = [seedStn];
+      const visited = new Set<string>([seedStn]);
       while (queue.length > 0) {
         const curr = queue.shift()!;
         const currC = currentCoords[curr];
@@ -1907,16 +1910,15 @@ export function perform3DNetworkAdjustment(
     let iterations = 0;
     let maxDisplacementMm = 0;
     let normalInv: number[][] | null = null;
+    let lastNormalN: number[][] | null = null;
     let finalResiduals: number[] = [];
     let finalBaselines: BaselineVector[] = [];
     let vPv = 0;
 
-    // Design matrix A (numObs x numUnknowns) and misclosure vector l (numObs)
     const A: number[][] = Array.from({ length: numObs }, () => Array(numUnknowns).fill(0));
     const l: number[] = Array(numObs).fill(0);
     const P_blocks: Array<[[number, number, number], [number, number, number], [number, number, number]]> = [];
 
-    // Invert 3x3 covariance matrix for each baseline to build weight block P_k
     for (let k = 0; k < activeBaselines.length; k++) {
       const b = activeBaselines[k];
       const qxx = b.qxx && !isNaN(b.qxx) ? b.qxx : 1e-5;
@@ -1926,19 +1928,22 @@ export function perform3DNetworkAdjustment(
       const qyz = b.qyz && !isNaN(b.qyz) ? b.qyz : 0;
       const qzx = b.qzx && !isNaN(b.qzx) ? b.qzx : 0;
 
-      const cov: [[number, number, number], [number, number, number], [number, number, number]] = [
-        [qxx, qxy, qzx],
-        [qxy, qyy, qyz],
-        [qzx, qyz, qzz],
-      ];
-      P_blocks.push(invert3x3(cov));
+      P_blocks.push(
+        invert3x3([
+          [qxx, qxy, qzx],
+          [qxy, qyy, qyz],
+          [qzx, qyz, qzz],
+        ])
+      );
     }
 
-    // Iterative Gauss-Markov solver
+    const gWeight = 1.0 / Math.sqrt(nStn);
+    const dimBordered = numUnknowns + 3;
+
+    // Iterative Gauss-Markov Inner-Constraint Solver
     for (let iter = 0; iter < 4; iter++) {
       iterations++;
 
-      // Clear A and l
       for (let r = 0; r < numObs; r++) {
         l[r] = 0;
         for (let c = 0; c < numUnknowns; c++) {
@@ -1946,7 +1951,6 @@ export function perform3DNetworkAdjustment(
         }
       }
 
-      // Populate A and l: l = b_obs - (X_to - X_from)
       for (let k = 0; k < activeBaselines.length; k++) {
         const b = activeBaselines[k];
         const rowStart = 3 * k;
@@ -1955,49 +1959,38 @@ export function perform3DNetworkAdjustment(
         const toCoord = currentCoords[b.toId];
         if (!fromCoord || !toCoord) continue;
 
-        const computedDX = toCoord.x - fromCoord.x;
-        const computedDY = toCoord.y - fromCoord.y;
-        const computedDZ = toCoord.z - fromCoord.z;
+        l[rowStart] = b.dX - (toCoord.x - fromCoord.x);
+        l[rowStart + 1] = b.dY - (toCoord.y - fromCoord.y);
+        l[rowStart + 2] = b.dZ - (toCoord.z - fromCoord.z);
 
-        l[rowStart] = b.dX - computedDX;
-        l[rowStart + 1] = b.dY - computedDY;
-        l[rowStart + 2] = b.dZ - computedDZ;
+        const uFrom = unknownIndexMap[b.fromId];
+        const colFrom = 3 * uFrom;
+        A[rowStart][colFrom] = -1.0;
+        A[rowStart + 1][colFrom + 1] = -1.0;
+        A[rowStart + 2][colFrom + 2] = -1.0;
 
-        // Derivatives w.r.t unknown station coordinates
-        if (b.fromId in unknownIndexMap) {
-          const uIdx = unknownIndexMap[b.fromId];
-          const colStart = 3 * uIdx;
-          A[rowStart][colStart] = -1.0;
-          A[rowStart + 1][colStart + 1] = -1.0;
-          A[rowStart + 2][colStart + 2] = -1.0;
-        }
-
-        if (b.toId in unknownIndexMap) {
-          const uIdx = unknownIndexMap[b.toId];
-          const colStart = 3 * uIdx;
-          A[rowStart][colStart] = 1.0;
-          A[rowStart + 1][colStart + 1] = 1.0;
-          A[rowStart + 2][colStart + 2] = 1.0;
-        }
+        const uTo = unknownIndexMap[b.toId];
+        const colTo = 3 * uTo;
+        A[rowStart][colTo] = 1.0;
+        A[rowStart + 1][colTo + 1] = 1.0;
+        A[rowStart + 2][colTo + 2] = 1.0;
       }
 
-      // Compute N = A^T * P * A and u = A^T * P * l
+      // N = A^T P A, u = A^T P l
       const N: number[][] = Array.from({ length: numUnknowns }, () => Array(numUnknowns).fill(0));
       const uVec: number[] = Array(numUnknowns).fill(0);
 
       for (let k = 0; k < activeBaselines.length; k++) {
         const rowStart = 3 * k;
         const P_k = P_blocks[k];
-
-        // Pl_k = P_k * l_k
         const l_k = [l[rowStart], l[rowStart + 1], l[rowStart + 2]];
+
         const Pl_k = [
           P_k[0][0] * l_k[0] + P_k[0][1] * l_k[1] + P_k[0][2] * l_k[2],
           P_k[1][0] * l_k[0] + P_k[1][1] * l_k[1] + P_k[1][2] * l_k[2],
           P_k[2][0] * l_k[0] + P_k[2][1] * l_k[1] + P_k[2][2] * l_k[2],
         ];
 
-        // A_k (3 x numUnknowns)
         for (let c = 0; c < numUnknowns; c++) {
           const A_kc0 = A[rowStart][c];
           const A_kc1 = A[rowStart + 1][c];
@@ -2006,7 +1999,6 @@ export function perform3DNetworkAdjustment(
 
           uVec[c] += A_kc0 * Pl_k[0] + A_kc1 * Pl_k[1] + A_kc2 * Pl_k[2];
 
-          // PA_k = P_k * A_k_col
           const PA0 = P_k[0][0] * A_kc0 + P_k[0][1] * A_kc1 + P_k[0][2] * A_kc2;
           const PA1 = P_k[1][0] * A_kc0 + P_k[1][1] * A_kc1 + P_k[1][2] * A_kc2;
           const PA2 = P_k[2][0] * A_kc0 + P_k[2][1] * A_kc1 + P_k[2][2] * A_kc2;
@@ -2021,11 +2013,42 @@ export function perform3DNetworkAdjustment(
           }
         }
       }
+      lastNormalN = N;
 
-      normalInv = invertMatrix(N);
-      if (!normalInv) return null;
+      // Construct Bordered Inner-Constraint System:
+      // [ N   G ]
+      // [ G^T 0 ]
+      // Scale G entries proportionally to sqrt(meanDiag(N)) for optimal numerical conditioning,
+      // which leaves Moore-Penrose pseudoinverse N+ block invariant.
+      let diagSum = 0;
+      for (let i = 0; i < numUnknowns; i++) diagSum += Math.abs(N[i][i]);
+      const gScale = Math.sqrt(Math.max(1.0, diagSum / Math.max(1, numUnknowns)));
+      const gEntry = gWeight * gScale;
 
-      // Parameter corrections dx_hat = N^-1 * u
+      const bordered: number[][] = Array.from({ length: dimBordered }, () =>
+        Array(dimBordered).fill(0)
+      );
+      for (let r = 0; r < numUnknowns; r++) {
+        for (let c = 0; c < numUnknowns; c++) {
+          bordered[r][c] = N[r][c];
+        }
+      }
+      for (let stIdx = 0; stIdx < nStn; stIdx++) {
+        const colBase = 3 * stIdx;
+        for (let axis = 0; axis < 3; axis++) {
+          bordered[colBase + axis][numUnknowns + axis] = gEntry;
+          bordered[numUnknowns + axis][colBase + axis] = gEntry;
+        }
+      }
+
+      const borderedInv = invertMatrixGaussJordan(bordered);
+      if (!borderedInv) return null;
+
+      // Upper-left (numUnknowns x numUnknowns) block is exact Moore-Penrose pseudoinverse N+
+      normalInv = Array.from({ length: numUnknowns }, (_, r) =>
+        borderedInv[r].slice(0, numUnknowns)
+      );
+
       const dx_hat: number[] = Array(numUnknowns).fill(0);
       for (let r = 0; r < numUnknowns; r++) {
         for (let c = 0; c < numUnknowns; c++) {
@@ -2033,9 +2056,8 @@ export function perform3DNetworkAdjustment(
         }
       }
 
-      // Apply updates to coordinates
       let stepMaxMm = 0;
-      for (let i = 0; i < uCount; i++) {
+      for (let i = 0; i < nStn; i++) {
         const stId = unknownStationIds[i];
         const colStart = 3 * i;
         const dX = dx_hat[colStart];
@@ -2051,10 +2073,10 @@ export function perform3DNetworkAdjustment(
       }
 
       maxDisplacementMm = stepMaxMm;
-      if (stepMaxMm < 0.05) break; // Converged
+      if (stepMaxMm < 0.05) break;
     }
 
-    // Calculate final residuals v = A * x_hat - l
+    // Calculate final residuals v = (X_to - X_from) - b_obs
     finalResiduals = Array(numObs).fill(0);
     vPv = 0;
 
@@ -2085,18 +2107,20 @@ export function perform3DNetworkAdjustment(
       vPv += v_k[0] * Pv_k[0] + v_k[1] * Pv_k[1] + v_k[2] * Pv_k[2];
     }
 
-    const sigma0Aposteriori = Math.sqrt(Math.max(1e-12, vPv / effectiveDof));
+    const sigma0Aposteriori = dof > 0 ? Math.sqrt(Math.max(1e-12, vPv / dof)) : 1.0;
     const sigma0Sq = sigma0Aposteriori * sigma0Aposteriori;
 
-    // Global Model Chi-Square Test (at 95% confidence)
-    const chiLower = Math.max(0.01, effectiveDof * Math.pow(1 - 2 / (9 * effectiveDof) - 1.96 * Math.sqrt(2 / (9 * effectiveDof)), 3));
-    const chiUpper = effectiveDof * Math.pow(1 - 2 / (9 * effectiveDof) + 1.96 * Math.sqrt(2 / (9 * effectiveDof)), 3);
-    const chiPassed = vPv >= chiLower && vPv <= chiUpper;
+    // Global Model Chi-Square Test (95% confidence)
+    const chiLower = dof > 0
+      ? Math.max(0.01, effectiveDof * Math.pow(1 - 2 / (9 * effectiveDof) - 1.96 * Math.sqrt(2 / (9 * effectiveDof)), 3))
+      : 0;
+    const chiUpper = dof > 0
+      ? effectiveDof * Math.pow(1 - 2 / (9 * effectiveDof) + 1.96 * Math.sqrt(2 / (9 * effectiveDof)), 3)
+      : 1e9;
+    const chiPassed = dof > 0 && vPv >= chiLower && vPv <= chiUpper;
 
-    // Baarda Data Snooping (w-test) outlier detection & Rigorous DynAdjust Q_vv calculation
     const outliers: string[] = [];
     finalBaselines = [];
-
     let totalRedundancySum = 0;
 
     for (let k = 0; k < activeBaselines.length; k++) {
@@ -2111,12 +2135,8 @@ export function perform3DNetworkAdjustment(
       const vZ_mm = vZ * 1000.0;
       const spatialV_mm = Math.sqrt(vX_mm * vX_mm + vY_mm * vY_mm + vZ_mm * vZ_mm);
 
-      // Rigorous DynAdjust Q_vv computation:
-      // Q_vv_k = Q_k - (A_k * N^-1 * A_k^T)
-      const fromIsUnknown = b.fromId in unknownIndexMap;
-      const toIsUnknown = b.toId in unknownIndexMap;
-      const uFrom = fromIsUnknown ? unknownIndexMap[b.fromId] : -1;
-      const uTo = toIsUnknown ? unknownIndexMap[b.toId] : -1;
+      const uFrom = unknownIndexMap[b.fromId];
+      const uTo = unknownIndexMap[b.toId];
 
       const ACAT: number[][] = [
         [0, 0, 0],
@@ -2127,18 +2147,11 @@ export function perform3DNetworkAdjustment(
       if (normalInv) {
         for (let r = 0; r < 3; r++) {
           for (let c = 0; c < 3; c++) {
-            let val = 0;
-            if (toIsUnknown) {
-              val += normalInv[3 * uTo + r][3 * uTo + c];
-            }
-            if (fromIsUnknown) {
-              val += normalInv[3 * uFrom + r][3 * uFrom + c];
-            }
-            if (toIsUnknown && fromIsUnknown) {
-              val -= normalInv[3 * uTo + r][3 * uFrom + c];
-              val -= normalInv[3 * uFrom + r][3 * uTo + c];
-            }
-            ACAT[r][c] = val;
+            ACAT[r][c] =
+              normalInv[3 * uTo + r][3 * uTo + c] +
+              normalInv[3 * uFrom + r][3 * uFrom + c] -
+              normalInv[3 * uTo + r][3 * uFrom + c] -
+              normalInv[3 * uFrom + r][3 * uTo + c];
           }
         }
       }
@@ -2149,12 +2162,10 @@ export function perform3DNetworkAdjustment(
         [b.qzx || 0, b.qyz || 0, b.qzz || 1e-5],
       ];
 
-      // Exact diagonal variances of residuals (m^2)
       const qvv_X = Math.max(1e-12, Q_k[0][0] - ACAT[0][0]);
       const qvv_Y = Math.max(1e-12, Q_k[1][1] - ACAT[1][1]);
       const qvv_Z = Math.max(1e-12, Q_k[2][2] - ACAT[2][2]);
 
-      // Redundancy contribution: trace(Q_vv_k * P_k)
       const P_k = P_blocks[k];
       let r_k = 0;
       for (let i = 0; i < 3; i++) {
@@ -2166,16 +2177,13 @@ export function perform3DNetworkAdjustment(
       r_k = Math.max(0, Math.min(3, r_k));
       totalRedundancySum += r_k;
 
-      // Exact Baarda w-test normalized residuals
-      const wX = Math.abs(vX) / (sigma0Aposteriori * Math.sqrt(qvv_X));
-      const wY = Math.abs(vY) / (sigma0Aposteriori * Math.sqrt(qvv_Y));
-      const wZ = Math.abs(vZ) / (sigma0Aposteriori * Math.sqrt(qvv_Z));
+      const wX = dof > 0 && qvv_X > 1e-11 ? Math.abs(vX) / (sigma0Aposteriori * Math.sqrt(qvv_X)) : 0;
+      const wY = dof > 0 && qvv_Y > 1e-11 ? Math.abs(vY) / (sigma0Aposteriori * Math.sqrt(qvv_Y)) : 0;
+      const wZ = dof > 0 && qvv_Z > 1e-11 ? Math.abs(vZ) / (sigma0Aposteriori * Math.sqrt(qvv_Z)) : 0;
       const maxW = Math.max(wX, wY, wZ);
 
       const isOutlier = maxW > config.wCrit;
-      if (isOutlier) {
-        outliers.push(b.id);
-      }
+      if (isOutlier) outliers.push(b.id);
 
       finalBaselines.push({
         ...b,
@@ -2189,7 +2197,6 @@ export function perform3DNetworkAdjustment(
       });
     }
 
-    // Matrix Diagnostics for DynAdjust Inspector
     let nonZeroACount = 0;
     for (let r = 0; r < numObs; r++) {
       for (let c = 0; c < numUnknowns; c++) {
@@ -2199,191 +2206,149 @@ export function perform3DNetworkAdjustment(
     const totalElements = numObs * numUnknowns;
     const sparsityPercent = totalElements > 0 ? (1 - nonZeroACount / totalElements) * 100 : 0;
 
-    // Normal Matrix condition number estimate
     let maxDiag = 0;
     let minDiag = Infinity;
+    let maxCorrelation = 0;
     if (normalInv) {
       for (let i = 0; i < numUnknowns; i++) {
         const diag = Math.abs(normalInv[i][i]);
         if (diag > maxDiag) maxDiag = diag;
         if (diag < minDiag && diag > 1e-15) minDiag = diag;
+        for (let j = i + 1; j < numUnknowns; j++) {
+          const denom = Math.sqrt(Math.max(1e-24, normalInv[i][i] * normalInv[j][j]));
+          const corr = Math.abs(normalInv[i][j]) / denom;
+          if (corr > maxCorrelation && isFinite(corr)) maxCorrelation = corr;
+        }
       }
     }
+    void lastNormalN;
     const conditionNumberN = minDiag > 0 && isFinite(minDiag) ? maxDiag / minDiag : 1.0;
     const averageRedundancy = activeBaselines.length > 0 ? totalRedundancySum / (activeBaselines.length * 3) : 0;
 
-    // Parameter Covariance Matrix Sigma_xx = sigma0^2 * N^-1
+    // Parameter Covariance Matrix Sigma_xx = sigma0^2 * N+ for ALL stations
     const adjustedStations: Record<string, Station> = {};
 
     for (const id of stationKeys) {
       const origSt = inputStations[id];
       const adjCoord = currentCoords[id];
-
-      // Compute updated Geodetic and TM coordinates using Bowring and Gauss-Krüger
       const geo = ecefToGeodetic(adjCoord.x, adjCoord.y, adjCoord.z);
       const tm = geodeticToTM(geo.lat, geo.lon, config.dom);
 
-      if (id in unknownIndexMap && normalInv) {
-        const uIdx = unknownIndexMap[id];
-        const colStart = 3 * uIdx;
+      const uIdx = unknownIndexMap[id];
+      const colStart = 3 * uIdx;
 
-        // Variance in ECEF X, Y, Z (m^2)
-        const varX = sigma0Sq * normalInv[colStart][colStart];
-        const varY = sigma0Sq * normalInv[colStart + 1][colStart + 1];
-        const varZ = sigma0Sq * normalInv[colStart + 2][colStart + 2];
-        const covXY = sigma0Sq * normalInv[colStart][colStart + 1];
-        const covYZ = sigma0Sq * normalInv[colStart + 1][colStart + 2];
-        const covZX = sigma0Sq * normalInv[colStart + 2][colStart];
+      const varX = normalInv ? sigma0Sq * normalInv[colStart][colStart] : 0;
+      const varY = normalInv ? sigma0Sq * normalInv[colStart + 1][colStart + 1] : 0;
+      const varZ = normalInv ? sigma0Sq * normalInv[colStart + 2][colStart + 2] : 0;
+      const covXY = normalInv ? sigma0Sq * normalInv[colStart][colStart + 1] : 0;
+      const covYZ = normalInv ? sigma0Sq * normalInv[colStart + 1][colStart + 2] : 0;
+      const covZX = normalInv ? sigma0Sq * normalInv[colStart + 2][colStart] : 0;
 
-        const sigmaX_mm = Math.sqrt(Math.max(1e-12, Math.abs(varX))) * 1000.0;
-        const sigmaY_mm = Math.sqrt(Math.max(1e-12, Math.abs(varY))) * 1000.0;
-        const sigmaZ_mm = Math.sqrt(Math.max(1e-12, Math.abs(varZ))) * 1000.0;
+      const sigmaX_mm = Math.sqrt(Math.max(1e-12, Math.abs(varX))) * 1000.0;
+      const sigmaY_mm = Math.sqrt(Math.max(1e-12, Math.abs(varY))) * 1000.0;
+      const sigmaZ_mm = Math.sqrt(Math.max(1e-12, Math.abs(varZ))) * 1000.0;
 
-        // Transform ECEF covariance submatrix to Local Topocentric ENU
-        const phi = degToRad(geo.lat);
-        const lam = degToRad(geo.lon);
-        const sPhi = Math.sin(phi);
-        const cPhi = Math.cos(phi);
-        const sLam = Math.sin(lam);
-        const cLam = Math.cos(lam);
+      const phi = degToRad(geo.lat);
+      const lam = degToRad(geo.lon);
+      const sPhi = Math.sin(phi);
+      const cPhi = Math.cos(phi);
+      const sLam = Math.sin(lam);
+      const cLam = Math.cos(lam);
 
-        const R = [
-          [-sLam, cLam, 0],
-          [-sPhi * cLam, -sPhi * sLam, cPhi],
-          [cPhi * cLam, cPhi * sLam, sPhi],
-        ];
+      const R = [
+        [-sLam, cLam, 0],
+        [-sPhi * cLam, -sPhi * sLam, cPhi],
+        [cPhi * cLam, cPhi * sLam, sPhi],
+      ];
 
-        const covXYZ = [
-          [varX, covXY, covZX],
-          [covXY, varY, covYZ],
-          [covZX, covYZ, varZ],
-        ];
+      const covXYZ = [
+        [varX, covXY, covZX],
+        [covXY, varY, covYZ],
+        [covZX, covYZ, varZ],
+      ];
 
-        // R * covXYZ * R^T
-        const temp: number[][] = Array.from({ length: 3 }, () => Array(3).fill(0));
-        for (let r = 0; r < 3; r++) {
-          for (let c = 0; c < 3; c++) {
-            temp[r][c] = R[r][0] * covXYZ[0][c] + R[r][1] * covXYZ[1][c] + R[r][2] * covXYZ[2][c];
-          }
+      const temp: number[][] = Array.from({ length: 3 }, () => Array(3).fill(0));
+      for (let r = 0; r < 3; r++) {
+        for (let c = 0; c < 3; c++) {
+          temp[r][c] = R[r][0] * covXYZ[0][c] + R[r][1] * covXYZ[1][c] + R[r][2] * covXYZ[2][c];
         }
-
-        const covENU: number[][] = Array.from({ length: 3 }, () => Array(3).fill(0));
-        for (let r = 0; r < 3; r++) {
-          for (let c = 0; c < 3; c++) {
-            covENU[r][c] = temp[r][0] * R[c][0] + temp[r][1] * R[c][1] + temp[r][2] * R[c][2];
-          }
-        }
-
-        const varE = Math.max(1e-12, covENU[0][0]);
-        const varN = Math.max(1e-12, covENU[1][1]);
-        const covEN = covENU[0][1];
-        const varU = Math.max(1e-12, covENU[2][2]);
-
-        const sigmaEast_mm = Math.sqrt(varE) * 1000.0;
-        const sigmaNorth_mm = Math.sqrt(varN) * 1000.0;
-        const sigmaUp_mm = Math.sqrt(varU) * 1000.0;
-
-        // Horizontal Error Ellipse at 95% confidence level (factor c = 2.4477, BÖHYY)
-        const diffEN = varN - varE;
-        const rootTerm = Math.sqrt(diffEN * diffEN + 4.0 * covEN * covEN);
-        const semiMajorM = Math.sqrt(Math.max(1e-12, (varN + varE + rootTerm) / 2.0)) * 2.4477;
-        const semiMinorM = Math.sqrt(Math.max(1e-12, (varN + varE - rootTerm) / 2.0)) * 2.4477;
-        const semiAxisC_mm = Math.sqrt(varU) * 2.7955 * 1000.0; // 3D ellipsoid vertical axis at 95%
-
-        let thetaRad = 0.5 * Math.atan2(2.0 * covEN, diffEN);
-        if (thetaRad < 0) thetaRad += Math.PI;
-        const ellipseAzimuthGon = degToGon(radToDeg(thetaRad));
-
-        const sigmaH_mm = Math.sqrt(varU) * 1.96 * 1000.0;
-
-        const apcCalc = calculateAntennaPhaseCenterHeight(
-          origSt.antenna?.heightType || 'vertical',
-          origSt.antenna?.measuredHeight || 0,
-          origSt.antenna?.radius || 0.09,
-          origSt.antenna?.verticalOffset || 0,
-          origSt.antenna?.pcoL1?.u ?? 89.35,
-          origSt.antenna?.pcoL2?.u ?? 117.76,
-          'L3'
-        );
-        const groundH = geo.h;
-        const arpH = Number((groundH + apcCalc.hArp).toFixed(4));
-        const apcH = Number((groundH + apcCalc.hApcL3).toFixed(4));
-
-        adjustedStations[id] = {
-          ...origSt,
-          adjustedX: adjCoord.x,
-          adjustedY: adjCoord.y,
-          adjustedZ: adjCoord.z,
-          adjustedLat: geo.lat,
-          adjustedLon: geo.lon,
-          adjustedH: groundH,
-          groundH,
-          arpH,
-          apcH,
-          adjustedProjY: tm.projY,
-          adjustedProjX: tm.projX,
-          sigmaX: sigmaX_mm,
-          sigmaY: sigmaY_mm,
-          sigmaZ: sigmaZ_mm,
-          sigmaEast: sigmaEast_mm,
-          sigmaNorth: sigmaNorth_mm,
-          sigmaUp: sigmaUp_mm,
-          semiMajor: semiMajorM * 1000.0,
-          semiMinor: semiMinorM * 1000.0,
-          semiAxisC: semiAxisC_mm,
-          ellipseAzimuth: ellipseAzimuthGon,
-          sigmaH: sigmaH_mm,
-        };
-      } else {
-        // Fixed datum station (zero adjustment dispersion)
-        const apcCalc = calculateAntennaPhaseCenterHeight(
-          origSt.antenna?.heightType || 'vertical',
-          origSt.antenna?.measuredHeight || 0,
-          origSt.antenna?.radius || 0.09,
-          origSt.antenna?.verticalOffset || 0,
-          origSt.antenna?.pcoL1?.u ?? 89.35,
-          origSt.antenna?.pcoL2?.u ?? 117.76,
-          'L3'
-        );
-        const groundH = geo.h;
-        const arpH = Number((groundH + apcCalc.hArp).toFixed(4));
-        const apcH = Number((groundH + apcCalc.hApcL3).toFixed(4));
-
-        adjustedStations[id] = {
-          ...origSt,
-          adjustedX: adjCoord.x,
-          adjustedY: adjCoord.y,
-          adjustedZ: adjCoord.z,
-          adjustedLat: geo.lat,
-          adjustedLon: geo.lon,
-          adjustedH: groundH,
-          groundH,
-          arpH,
-          apcH,
-          adjustedProjY: tm.projY,
-          adjustedProjX: tm.projX,
-          sigmaX: 0.0,
-          sigmaY: 0.0,
-          sigmaZ: 0.0,
-          sigmaEast: 0.0,
-          sigmaNorth: 0.0,
-          sigmaUp: 0.0,
-          semiMajor: 0.0,
-          semiMinor: 0.0,
-          semiAxisC: 0.0,
-          ellipseAzimuth: 0.0,
-          sigmaH: 0.0,
-        };
       }
+
+      const covENU: number[][] = Array.from({ length: 3 }, () => Array(3).fill(0));
+      for (let r = 0; r < 3; r++) {
+        for (let c = 0; c < 3; c++) {
+          covENU[r][c] = temp[r][0] * R[c][0] + temp[r][1] * R[c][1] + temp[r][2] * R[c][2];
+        }
+      }
+
+      const varE = Math.max(1e-12, covENU[0][0]);
+      const varN = Math.max(1e-12, covENU[1][1]);
+      const covEN = covENU[0][1];
+      const varU = Math.max(1e-12, covENU[2][2]);
+
+      const sigmaEast_mm = Math.sqrt(varE) * 1000.0;
+      const sigmaNorth_mm = Math.sqrt(varN) * 1000.0;
+      const sigmaUp_mm = Math.sqrt(varU) * 1000.0;
+
+      // 95% confidence horizontal error ellipse (c = 2.4477, BÖHYY)
+      const diffEN = varN - varE;
+      const rootTerm = Math.sqrt(diffEN * diffEN + 4.0 * covEN * covEN);
+      const semiMajorM = Math.sqrt(Math.max(1e-12, (varN + varE + rootTerm) / 2.0)) * 2.4477;
+      const semiMinorM = Math.sqrt(Math.max(1e-12, (varN + varE - rootTerm) / 2.0)) * 2.4477;
+      const semiAxisC_mm = Math.sqrt(varU) * 2.7955 * 1000.0;
+
+      let thetaRad = 0.5 * Math.atan2(2.0 * covEN, diffEN);
+      if (thetaRad < 0) thetaRad += Math.PI;
+      const ellipseAzimuthGon = degToGon(radToDeg(thetaRad));
+      const sigmaH_mm = Math.sqrt(varU) * 1.96 * 1000.0;
+
+      const apcCalc = calculateAntennaPhaseCenterHeight(
+        origSt.antenna?.heightType || 'vertical',
+        origSt.antenna?.measuredHeight || 0,
+        origSt.antenna?.radius || 0.09,
+        origSt.antenna?.verticalOffset || 0,
+        origSt.antenna?.pcoL1?.u ?? 0,
+        origSt.antenna?.pcoL2?.u ?? 0,
+        'L3'
+      );
+      const groundH = geo.h;
+      const arpH = Number((groundH + apcCalc.hArp).toFixed(4));
+      const apcH = Number((groundH + apcCalc.hApcL3).toFixed(4));
+
+      adjustedStations[id] = {
+        ...origSt,
+        adjustedX: adjCoord.x,
+        adjustedY: adjCoord.y,
+        adjustedZ: adjCoord.z,
+        adjustedLat: geo.lat,
+        adjustedLon: geo.lon,
+        adjustedH: groundH,
+        groundH,
+        arpH,
+        apcH,
+        adjustedProjY: tm.projY,
+        adjustedProjX: tm.projX,
+        sigmaX: sigmaX_mm,
+        sigmaY: sigmaY_mm,
+        sigmaZ: sigmaZ_mm,
+        sigmaEast: sigmaEast_mm,
+        sigmaNorth: sigmaNorth_mm,
+        sigmaUp: sigmaUp_mm,
+        semiMajor: semiMajorM * 1000.0,
+        semiMinor: semiMinorM * 1000.0,
+        semiAxisC: semiAxisC_mm,
+        ellipseAzimuth: ellipseAzimuthGon,
+        sigmaH: sigmaH_mm,
+      };
     }
 
     return {
       mode,
       fixedStationIds,
       unknownStationIds,
-      dof: effectiveDof,
+      dof: Math.max(0, dof),
       totalObservations: numObs,
-      totalUnknowns: numUnknowns,
+      totalUnknowns: numUnknowns - 3,
       sigma0Apriori: 1.0,
       sigma0Aposteriori,
       vPv,
@@ -2401,7 +2366,7 @@ export function perform3DNetworkAdjustment(
         sparsityPercent,
         conditionNumberN,
         averageRedundancy,
-        maxCorrelation: 0.85,
+        maxCorrelation: Math.round(maxCorrelation * 1000) / 1000,
       },
       stations: adjustedStations,
       baselines: finalBaselines,
@@ -2415,8 +2380,6 @@ export function perform3DNetworkAdjustment(
     return null;
   }
 }
-
-
 
 // ============================================================================
 // EXCEL & REPORT GENERATOR (Kadastro & BÖHYY Standartları)
@@ -2440,7 +2403,7 @@ export function exportAdjustmentToExcel(
     ['Meridyen (DOM)', `${config.dom}°`],
     ['Açı Birimi', config.angleUnit],
     ['Elipsoit', 'GRS80 (a=6378137.0 m, 1/f=298.257222101)'],
-    ['Dengeleme Modu', '3D Serbest Ağ Dengelemesi (İç Tutarlılık / Datum Sabit)'],
+    ['Dengeleme Modu', 'İç Kısıtlı Serbest Ağ Dengelemesi (İz Minimizasyonu / N+)'],
     ['Birim Ölçünün Karesel Ort. Hatası (sigma_0)', adjResult.sigma0Aposteriori.toFixed(4)],
     ['Serbestlik Derecesi (DOF)', adjResult.dof],
     ['Kareler Toplamı [vPv]', adjResult.vPv.toFixed(6)],
@@ -2476,7 +2439,7 @@ export function exportAdjustmentToExcel(
   const coordRows = Object.values(adjResult.stations).map((st) => [
     st.name,
     st.type,
-    st.isFixed.x && st.isFixed.y && st.isFixed.z ? 'SABİT (CORS)' : 'DENGELENDİ',
+    adjResult.fixedStationIds.includes(st.id) ? 'SABİT (CORS)' : 'SERBEST DENGELİ',
     (st.adjustedX ?? st.x).toFixed(4),
     (st.adjustedY ?? st.y).toFixed(4),
     (st.adjustedZ ?? st.z).toFixed(4),
@@ -2605,160 +2568,3 @@ export const DEFAULT_CONFIG: JobConfig = {
 export const INITIAL_STATIONS: Record<string, Station> = {};
 export const INITIAL_BASELINES: BaselineVector[] = [];
 
-/**
- * Automatically derives baseline network vectors between stations
- * conforming to Topcon Tools / Trimble Business Center (TBC) double-difference carrier phase processing.
- * Applies antenna ARP height reduction, NOAA ANTCAL PCO (Phase Center Offset)
- * and stochastic noise modeling so Gauss-Markov 3D adjustment yields true residuals and error ellipses.
- */
-export function generateBaselinesFromStations(stations: Record<string, Station>): BaselineVector[] {
-  const stationList = Object.values(stations);
-  if (stationList.length < 2) return [];
-
-  const baselines: BaselineVector[] = [];
-  const addedPairs = new Set<string>();
-
-  let bIndex = 1;
-
-  // Helper to compute ENU antenna offset (ARP height + Iono-Free PCO)
-  function getAntennaEcefOffset(st: Station): { dx: number; dy: number; dz: number } {
-    const pcoL1 = st.antenna.pcoL1 || { n: 0.65, e: 1.35, u: 89.35 };
-    const pcoL2 = st.antenna.pcoL2 || { n: -0.24, e: 0.00, u: 117.76 };
-
-    // Iono-Free (L3 / LC) PCO combination (m) conforming to IGS GPS standards:
-    const c1 = 2.545728;
-    const c2 = 1.545728;
-    const pcoE_m = (c1 * pcoL1.e - c2 * pcoL2.e) / 1000.0;
-    const pcoN_m = (c1 * pcoL1.n - c2 * pcoL2.n) / 1000.0;
-    const pcoU_m = (c1 * pcoL1.u - c2 * pcoL2.u) / 1000.0;
-
-    // Calculate pure vertical ARP height (without PCO)
-    const arpHeightM = calculateCorrectedAntennaHeight(
-      st.antenna.heightType,
-      st.antenna.measuredHeight,
-      st.antenna.radius,
-      st.antenna.verticalOffset
-    );
-    const totalUp_m = arpHeightM + pcoU_m;
-
-    // Transform ENU offset to ECEF
-    const phi = degToRad(st.lat);
-    const lam = degToRad(st.lon);
-    const sPhi = Math.sin(phi);
-    const cPhi = Math.cos(phi);
-    const sLam = Math.sin(lam);
-    const cLam = Math.cos(lam);
-
-    const dEcefX = -sLam * pcoE_m - sPhi * cLam * pcoN_m + cPhi * cLam * totalUp_m;
-    const dEcefY = cLam * pcoE_m - sPhi * sLam * pcoN_m + cPhi * sLam * totalUp_m;
-    const dEcefZ = cPhi * pcoN_m + sPhi * totalUp_m;
-
-    return { dx: dEcefX, dy: dEcefY, dz: dEcefZ };
-  }
-
-  // Explicit Pair Generation Strategy for TUSAGA Base & Rover Topology:
-  // 1. Radial Baselines (Radyal Bazlar - Ana Ölçüler): Connect every Base (CORS/Fixed) station to every Rover (Unknown) station
-  // 2. Control Baselines (Kontrol Bazları): Connect every Base station to every other Base station
-  // 3. Rover Connections: Connect Rovers to each other to complete 3D closed loops
-  const pairsToCreate: Array<[Station, Station]> = [];
-
-  const baseStations = stationList.filter((s) => s.type === 'CORS' || (s.isFixed.x && s.isFixed.y && s.isFixed.z));
-  const roverStations = stationList.filter((s) => !baseStations.includes(s));
-
-  // 1. Radial Baselines: Base -> Rover
-  for (const base of baseStations) {
-    for (const rover of roverStations) {
-      pairsToCreate.push([base, rover]);
-    }
-  }
-
-  // 2. Control Baselines: Base -> Base
-  for (let i = 0; i < baseStations.length; i++) {
-    for (let j = i + 1; j < baseStations.length; j++) {
-      pairsToCreate.push([baseStations[i], baseStations[j]]);
-    }
-  }
-
-  // 3. Rover-to-Rover Baselines (if multiple rovers)
-  for (let i = 0; i < roverStations.length; i++) {
-    for (let j = i + 1; j < roverStations.length; j++) {
-      pairsToCreate.push([roverStations[i], roverStations[j]]);
-    }
-  }
-
-  // Fallback: If no base/rover distinction found, connect proximity neighbors (up to 3)
-  if (pairsToCreate.length === 0) {
-    for (let i = 0; i < stationList.length; i++) {
-      for (let j = i + 1; j < stationList.length; j++) {
-        pairsToCreate.push([stationList[i], stationList[j]]);
-      }
-    }
-  }
-
-  for (const [s1, s2] of pairsToCreate) {
-    const pairKey = [s1.id, s2.id].sort().join('___');
-    if (addedPairs.has(pairKey)) continue;
-    addedPairs.add(pairKey);
-
-    const trueGroundDX = s2.x - s1.x;
-    const trueGroundDY = s2.y - s1.y;
-    const trueGroundDZ = s2.z - s1.z;
-    const length = Math.sqrt(trueGroundDX * trueGroundDX + trueGroundDY * trueGroundDY + trueGroundDZ * trueGroundDZ);
-
-    // Antenna offsets
-    const ant1 = getAntennaEcefOffset(s1);
-    const ant2 = getAntennaEcefOffset(s2);
-
-    // Phase center vector = Ground Vector + (Ant2 - Ant1)
-    const apcDX = trueGroundDX + (ant2.dx - ant1.dx);
-    const apcDY = trueGroundDY + (ant2.dy - ant1.dy);
-    const apcDZ = trueGroundDZ + (ant2.dz - ant1.dz);
-
-    // Pseudo-random carrier phase double difference noise (approx 1.5mm - 3.5mm)
-    const hashVal = (bIndex * 13 + s1.id.charCodeAt(0) + s2.id.charCodeAt(0)) % 100;
-    const noiseX = ((hashVal % 11) - 5) * 0.0006;
-    const noiseY = (((hashVal * 3) % 11) - 5) * 0.0006;
-    const noiseZ = (((hashVal * 7) % 11) - 5) * 0.0006;
-
-    // Final double difference observed baseline
-    const dX = apcDX - (ant2.dx - ant1.dx) + noiseX;
-    const dY = apcDY - (ant2.dy - ant1.dy) + noiseY;
-    const dZ = apcDZ - (ant2.dz - ant1.dz) + noiseZ;
-
-    // Realistic covariance: (2.5 mm + 0.5 ppm * S)^2 in m^2
-    const sigmaM = (2.5 + 0.5 * (length / 1000.0)) * 1e-3;
-    const varM2 = sigmaM * sigmaM;
-
-    const qxx = varM2 * 0.95;
-    const qyy = varM2 * 1.05;
-    const qzz = varM2 * 0.85;
-    const qxy = varM2 * 0.22;
-    const qyz = varM2 * 0.15;
-    const qzx = varM2 * 0.18;
-
-    baselines.push({
-      id: `BASE_${bIndex < 10 ? '0' + bIndex : bIndex}`,
-      fromId: s1.id,
-      toId: s2.id,
-      dX,
-      dY,
-      dZ,
-      length,
-      qxx,
-      qyy,
-      qzz,
-      qxy,
-      qyz,
-      qzx,
-      solutionType: 'FIX',
-      ratio: 28.5 + (bIndex % 8) * 1.8,
-      rms: 0.0025,
-      durationMin: Math.max(30, Math.min(180, Math.round(length / 200))),
-      satellites: 24,
-      pdop: 1.2,
-    });
-    bIndex++;
-  }
-
-  return baselines;
-}

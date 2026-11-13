@@ -171,3 +171,15 @@ export async function clearOpfsRinexDirectory(): Promise<void> {
 
   memoryFileCache.clear();
 }
+
+/**
+ * Returns a plain object map of all files stored in the in-memory fallback cache
+ */
+export function getCachedFilesRecord(): Record<string, File> {
+  const out: Record<string, File> = {};
+  memoryFileCache.forEach((file, name) => {
+    out[name] = file;
+  });
+  return out;
+}
+

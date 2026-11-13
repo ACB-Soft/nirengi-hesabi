@@ -13,18 +13,24 @@ import {
   BaselineVector,
   LoopClosure,
   AdjustmentResult,
+  IgsSp3File,
 } from './types/gnss';
 import {
   DEFAULT_CONFIG,
   calculateLoopClosures,
   perform3DNetworkAdjustment,
-  generateBaselinesFromStations,
   calculateCorrectedAntennaHeight,
   calculateAntennaPhaseCenterHeight,
 } from './utils/geodesy';
-import { batchProcessNetworkBaselines } from './utils/rtklibEngine';
+import { batchProcessNetworkBaselinesAsync } from './utils/rtklibEngine';
 import { WorkerProgressMessage } from './workers/gnssBaselineWorker';
-import { BroadcastEphemeris, parseRinexNavFile } from './utils/rinexNavParser';
+import {
+  BroadcastEphemeris,
+  IonoParameters,
+  Sp3OrbitData,
+  parseRinexNavDetailed,
+  mergeEphemerisMaps,
+} from './utils/rinexNavParser';
 import {
   getUncalibratedStations,
   parseAntexContent,
@@ -101,8 +107,11 @@ export default function App() {
   const [loopClosures, setLoopClosures] = useState<LoopClosure[]>([]);
   const [adjustmentResult, setAdjustmentResult] = useState<AdjustmentResult | null>(null);
 
-  // Native GNSS Worker Engine & Ephemeris
+  // Native GNSS Worker Engine, SP3 & Broadcast Ephemeris
   const [ephemerisMap, setEphemerisMap] = useState<Record<string, BroadcastEphemeris[]>>({});
+  const [sp3Orbit, setSp3Orbit] = useState<Sp3OrbitData | null>(null);
+  const [loadedSp3File, setLoadedSp3File] = useState<IgsSp3File | null>(null);
+  const [ionoParams, setIonoParams] = useState<IonoParameters | undefined>(undefined);
   const [isWorkerProcessing, setIsWorkerProcessing] = useState<boolean>(false);
   const [workerProgress, setWorkerProgress] = useState<WorkerProgressMessage | null>(null);
 
@@ -129,49 +138,30 @@ export default function App() {
 
   // Recalculate Loops
   const handleRecalculateLoops = useCallback(() => {
-    let currentBaselines = baselines;
-    if (currentBaselines.length === 0 && Object.keys(stations).length >= 2) {
-      currentBaselines = generateBaselinesFromStations(stations);
-      setBaselines(currentBaselines);
-    }
-
-    if (Object.keys(stations).length < 2 || currentBaselines.length === 0) {
-      showToast('Döngü analizi için ağda en az 2 nokta bulunmalıdır.');
+    if (Object.keys(stations).length < 2 || baselines.length === 0) {
+      showToast('Döngü analizi için önce Baz Çözümleri adımında gerçek RINEX baz vektörlerini hesaplayınız.');
       return;
     }
     const loops = calculateLoopClosures(
       stations,
-      currentBaselines,
+      baselines,
       config.loopToleranceBaseMm,
       config.loopTolerancePpm
     );
     setLoopClosures(loops);
-    showToast(`Topoloji analiz edildi: ${loops.length} bağımsız üçgen döngüsü tespit edildi.`);
+    showToast(`Topoloji analiz edildi: ${loops.length} bağımsız döngü tespit edildi.`);
   }, [stations, baselines, config]);
 
-  // Run 3D Network Adjustment (Free / Unconstrained Network Adjustment)
+  // Run 3D Network Adjustment (Inner-Constraint Free Network Adjustment / Trace Minimization)
   const handleRunAdjustment = useCallback(() => {
-    let currentBaselines = baselines;
-    if (currentBaselines.length === 0 && Object.keys(stations).length >= 2) {
-      currentBaselines = generateBaselinesFromStations(stations);
-      setBaselines(currentBaselines);
-      const loops = calculateLoopClosures(
-        stations,
-        currentBaselines,
-        config.loopToleranceBaseMm,
-        config.loopTolerancePpm
-      );
-      setLoopClosures(loops);
-    }
-
-    if (Object.keys(stations).length < 2 || currentBaselines.length === 0) {
-      showToast('Dengeleme hesabı için en az 2 nokta gereklidir. Lütfen Veri Girişi adımından RINEX yükleyiniz.');
+    if (Object.keys(stations).length < 2 || baselines.length === 0) {
+      showToast('Dengeleme hesabı için önce Baz Çözümleri adımında gerçek RINEX baz vektörlerini hesaplayınız.');
       return;
     }
     setIsLoading(true);
     setTimeout(() => {
       try {
-        const res = perform3DNetworkAdjustment(stations, currentBaselines, 'unconstrained', config);
+        const res = perform3DNetworkAdjustment(stations, baselines, 'unconstrained', config);
         setAdjustmentResult(res);
 
         if (res) {
@@ -180,10 +170,10 @@ export default function App() {
             ...res.stations,
           }));
           showToast(
-            `3D Gauss-Markov Serbest Ağ Dengelemesi tamamlandı! σ₀: ${res.sigma0Aposteriori.toFixed(4)}`
+            `İz Minimizasyonlu 3D Serbest Ağ Dengelemesi tamamlandı! σ₀: ${res.sigma0Aposteriori.toFixed(4)}`
           );
         } else {
-          showToast('Dengeleme için ağ geometrisini kontrol ediniz.');
+          showToast('Dengeleme için ağ bağlantısını ve aktif bazları kontrol ediniz.');
         }
       } catch (err) {
         console.error('Adjustment execution error:', err);
@@ -191,7 +181,7 @@ export default function App() {
       } finally {
         setIsLoading(false);
       }
-    }, 350);
+    }, 150);
   }, [stations, baselines, config]);
 
   // Exclude Outliers and Re-adjust
@@ -250,23 +240,60 @@ export default function App() {
     showToast('Tüm noktalar ve bazlar temizlendi.');
   };
 
-  const handleGenerateBaselinesFromPoints = () => {
-    if (Object.keys(stations).length < 2) {
-      showToast('Baz ağı türetmek için en az 2 nokta bulunmalıdır.');
+  const executeRealNetworkBaselines = async () => {
+    const stationList = Object.values(stations);
+    if (stationList.length < 2) {
+      showToast('Baz çözümü için ağda en az 2 istasyon bulunmalıdır.');
       return;
     }
-    const generated = batchProcessNetworkBaselines(stations, {
-      elevationMaskDeg: config.elevationMask,
-    });
-    setBaselines(generated);
-    const loops = calculateLoopClosures(
-      stations,
-      generated,
-      config.loopToleranceBaseMm,
-      config.loopTolerancePpm
-    );
-    setLoopClosures(loops);
-    showToast(`${generated.length} adet çift fark baz vektörü RTKLIB motoru ile çözüldü.`);
+    const uncalibrated = getUncalibratedStations(stations);
+    if (uncalibrated.length > 0) {
+      showToast(`Baz çözümü engellendi: ${uncalibrated.map((s) => s.name).join(', ')} anten kalibrasyonu eksik.`);
+      return;
+    }
+    const hasOrbit = !!sp3Orbit || Object.keys(ephemerisMap).length > 0;
+    if (!hasOrbit) {
+      showToast('Gerçek uydu yörüngesi için önce IGS .SP3 veya RINEX Navigasyon (.nav/.n/.g) dosyası yükleyiniz.');
+      return;
+    }
+
+    setIsWorkerProcessing(true);
+    setWorkerProgress(null);
+    try {
+      const solved = await batchProcessNetworkBaselinesAsync(
+        stations,
+        {
+          ephemerisMap,
+          sp3Orbit,
+          iono: ionoParams,
+          elevationMaskDeg: config.elevationMask,
+          frequencies: config.satelliteSystems === 'GPS Only' ? 'L1' : 'L1+L2',
+        },
+        (prog) => setWorkerProgress(prog)
+      );
+      setBaselines(solved);
+      const loops = calculateLoopClosures(
+        stations,
+        solved,
+        config.loopToleranceBaseMm,
+        config.loopTolerancePpm
+      );
+      setLoopClosures(loops);
+      const fixCount = solved.filter((b) => b.solutionType === 'FIX').length;
+      showToast(
+        `${solved.length} baz vektörü gerçek RINEX gözlemlerinden hesaplandı (${fixCount} FIX, ${solved.length - fixCount} FLOAT).`
+      );
+    } catch (err: any) {
+      console.error('Baseline solver error:', err);
+      showToast(`Baz çözümü hatası: ${err?.message || err}`);
+    } finally {
+      setIsWorkerProcessing(false);
+      setWorkerProgress(null);
+    }
+  };
+
+  const handleGenerateBaselinesFromPoints = () => {
+    void executeRealNetworkBaselines();
   };
 
   // Baseline Handlers
@@ -283,42 +310,57 @@ export default function App() {
   };
 
   const handleRunRtklibSimulation = () => {
-    if (Object.keys(stations).length < 2) {
-      showToast('RTKLIB çözümü için en az 2 nokta gereklidir.');
-      return;
-    }
-    const solved = batchProcessNetworkBaselines(stations, {
-      elevationMaskDeg: config.elevationMask,
-    });
-    setBaselines(solved);
-    const loops = calculateLoopClosures(
-      stations,
-      solved,
-      config.loopToleranceBaseMm,
-      config.loopTolerancePpm
-    );
-    setLoopClosures(loops);
-    showToast(`RTKLIB Çift Fark çözümü tamamlandı: ${solved.length} baz başarıyla hesaplandı.`);
+    void executeRealNetworkBaselines();
   };
 
   const handleUploadNavFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
 
     try {
-      const text = await file.text();
-      const parsed = parseRinexNavFile(text);
-      const satCount = Object.keys(parsed).length;
-      if (satCount > 0) {
-        setEphemerisMap(parsed);
-        showToast(`RINEX Navigasyon dosyası yüklendi: ${file.name} (${satCount} uydu efemerisi aktif)`);
+      let merged = ephemerisMap;
+      let latestIono = ionoParams;
+      let totalLoadedFiles = 0;
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const text = await file.text();
+        const detailed = parseRinexNavDetailed(text);
+        if (Object.keys(detailed.satellites).length > 0) {
+          merged = mergeEphemerisMaps(merged, detailed.satellites);
+          totalLoadedFiles++;
+        }
+        if (detailed.iono?.alpha && detailed.iono?.beta) {
+          latestIono = detailed.iono;
+        }
+      }
+
+      const satCount = Object.keys(merged).length;
+      if (totalLoadedFiles > 0 && satCount > 0) {
+        setEphemerisMap(merged);
+        if (latestIono) setIonoParams(latestIono);
+        showToast(
+          `${totalLoadedFiles} RINEX Navigasyon dosyası birleştirildi: Toplam ${satCount} GNSS uydusu aktif (GPS/GLONASS/Galileo).`
+        );
       } else {
-        showToast('Geçerli GPS navigasyon efemerisi bulunamadı.');
+        showToast('Geçerli bir GPS, GLONASS veya Galileo navigasyon efemerisi bulunamadı.');
       }
     } catch (err: any) {
       showToast(`Nav dosyası okuma hatası: ${err?.message || err}`);
     }
     e.target.value = '';
+  };
+
+  const handleSp3Loaded = (sp3Data: Sp3OrbitData) => {
+    setSp3Orbit(sp3Data);
+    setLoadedSp3File(sp3Data.summary);
+    showToast(
+      `IGS Hassas Yörünge (.SP3) yüklendi: ${sp3Data.summary.fileName} (${sp3Data.summary.satelliteCount} uydu, ${sp3Data.summary.epochCount} epok)`
+    );
+  };
+
+  const handleUpdateStationsBatch = (updatedMap: Record<string, Station>) => {
+    setStations((prev) => ({ ...prev, ...updatedMap }));
   };
 
   const handleGlobalAtxUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -694,10 +736,17 @@ export default function App() {
             onChangeConfig={setConfig}
             onResetConfigDefaults={() => setConfig(DEFAULT_CONFIG)}
             onUpdateStation={handleUpdateStation}
+            onUpdateStationsBatch={handleUpdateStationsBatch}
             onAddStation={handleAddStation}
             onDeleteStation={handleDeleteStation}
             onClearAllStations={handleClearAllStations}
             onNavigateTab={(tab) => setActiveTab(tab as TabKey)}
+            ephemerisMap={ephemerisMap}
+            sp3Orbit={sp3Orbit}
+            loadedSp3File={loadedSp3File}
+            ionoParams={ionoParams}
+            onSp3Loaded={handleSp3Loaded}
+            onUploadNavFile={handleUploadNavFile}
           />
         )}
 
@@ -706,6 +755,11 @@ export default function App() {
             baselines={baselines}
             stations={stations}
             ephemerisMap={ephemerisMap}
+            sp3Orbit={sp3Orbit}
+            loadedSp3File={loadedSp3File}
+            ionoParams={ionoParams}
+            elevationMask={config.elevationMask}
+            frequencies={config.satelliteSystems === 'GPS Only' ? 'L1' : 'L1+L2'}
             onUpdateBaseline={handleUpdateBaseline}
             onAddBaseline={handleAddBaseline}
             onDeleteBaseline={handleDeleteBaseline}

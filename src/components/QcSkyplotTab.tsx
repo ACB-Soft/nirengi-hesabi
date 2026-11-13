@@ -19,6 +19,7 @@ import {
   generateSatelliteSkyTracks,
   computeDopMetrics,
 } from '../utils/skyplotEngine';
+import { BroadcastEphemeris, Sp3OrbitData } from '../utils/rinexNavParser';
 import { TopconOccupationViewer } from './TopconOccupationViewer';
 import {
   Radio,
@@ -49,6 +50,8 @@ interface Props {
   baselines?: BaselineVector[];
   timeZone?: string;
   elevationMask?: number;
+  ephemerisMap?: Record<string, BroadcastEphemeris[]>;
+  sp3Orbit?: Sp3OrbitData | null;
   onOpenRinexModal?: () => void;
   selectedStationId?: string;
   onSelectStation?: (id: string) => void;
@@ -60,6 +63,8 @@ export const QcSkyplotTab: React.FC<Props> = ({
   baselines = [],
   timeZone = 'GMT+3:00',
   elevationMask = 10,
+  ephemerisMap,
+  sp3Orbit,
   onOpenRinexModal,
   selectedStationId,
   onSelectStation,
@@ -92,35 +97,22 @@ export const QcSkyplotTab: React.FC<Props> = ({
   const [selectedSatId, setSelectedSatId] = useState<string | null>(null);
   const [hoveredSatId, setHoveredSatId] = useState<string | null>(null);
 
-  // Compute Satellite Tracks
+  // Compute Satellite Tracks from real parsed RINEX satellites and real orbits (SP3 / Broadcast NAV)
   const allSatTracks: SatelliteSkyTrack[] = useMemo(() => {
-    if (!currentStation) return [];
-
-    if (occupation?.satellites && occupation.satellites.length > 0) {
-      return occupation.satellites.map((sat) =>
-        generateSatelliteSkyTracks(sat, currentStation, occupation.durationSeconds, maskAngle)
-      );
+    if (!currentStation || !occupation?.satellites || occupation.satellites.length === 0) {
+      return [];
     }
 
-    const defaultSats = [
-      { satId: 'G01', system: 'GPS' as GnssConstellation, prn: 1, totalEpochs: 480, validEpochs: 480, startSec: 0, endSec: 14400, timeSlots: [], freqs: ['L1', 'L2'] },
-      { satId: 'G03', system: 'GPS' as GnssConstellation, prn: 3, totalEpochs: 480, validEpochs: 460, startSec: 1200, endSec: 14400, timeSlots: [], freqs: ['L1', 'L2'] },
-      { satId: 'G08', system: 'GPS' as GnssConstellation, prn: 8, totalEpochs: 480, validEpochs: 480, startSec: 0, endSec: 11000, timeSlots: [], freqs: ['L1', 'L2'] },
-      { satId: 'G14', system: 'GPS' as GnssConstellation, prn: 14, totalEpochs: 480, validEpochs: 480, startSec: 3600, endSec: 14400, timeSlots: [], freqs: ['L1', 'L2'] },
-      { satId: 'G17', system: 'GPS' as GnssConstellation, prn: 17, totalEpochs: 480, validEpochs: 420, startSec: 0, endSec: 9000, timeSlots: [], freqs: ['L1', 'L2'] },
-      { satId: 'G22', system: 'GPS' as GnssConstellation, prn: 22, totalEpochs: 480, validEpochs: 480, startSec: 2400, endSec: 14400, timeSlots: [], freqs: ['L1', 'L2'] },
-      { satId: 'R02', system: 'GLONASS' as GnssConstellation, prn: 2, totalEpochs: 480, validEpochs: 480, startSec: 0, endSec: 13000, timeSlots: [], freqs: ['L1', 'L2'] },
-      { satId: 'R07', system: 'GLONASS' as GnssConstellation, prn: 7, totalEpochs: 480, validEpochs: 450, startSec: 1800, endSec: 14400, timeSlots: [], freqs: ['L1', 'L2'] },
-      { satId: 'R14', system: 'GLONASS' as GnssConstellation, prn: 14, totalEpochs: 480, validEpochs: 480, startSec: 0, endSec: 10500, timeSlots: [], freqs: ['L1', 'L2'] },
-      { satId: 'E03', system: 'Galileo' as GnssConstellation, prn: 3, totalEpochs: 480, validEpochs: 480, startSec: 600, endSec: 14400, timeSlots: [], freqs: ['E1', 'E5a'] },
-      { satId: 'E08', system: 'Galileo' as GnssConstellation, prn: 8, totalEpochs: 480, validEpochs: 480, startSec: 0, endSec: 14000, timeSlots: [], freqs: ['E1', 'E5a'] },
-      { satId: 'C06', system: 'BeiDou' as GnssConstellation, prn: 6, totalEpochs: 480, validEpochs: 480, startSec: 0, endSec: 14400, timeSlots: [], freqs: ['B1', 'B2'] },
-    ];
-
-    return defaultSats.map((sat) =>
-      generateSatelliteSkyTracks(sat, currentStation, 14400, maskAngle)
+    return occupation.satellites.map((sat) =>
+      generateSatelliteSkyTracks(
+        sat,
+        currentStation,
+        occupation.durationSeconds || 3600,
+        maskAngle,
+        { sp3Orbit, ephemerisMap }
+      )
     );
-  }, [currentStation, occupation, maskAngle]);
+  }, [currentStation, occupation, maskAngle, sp3Orbit, ephemerisMap]);
 
   // Filtered Tracks
   const filteredTracks = useMemo(() => {
@@ -321,54 +313,70 @@ export const QcSkyplotTab: React.FC<Props> = ({
       {/* WINDOW VIEW MODE 4 & 5: SKYPLOT & SNR ANALYSIS */}
       {(windowMode === 'skyplot' || windowMode === 'snr') && (
         <div className="space-y-4 animate-in fade-in">
+          {/* Orbit Requirement Notice when RINEX satellites exist without SP3/NAV orbits */}
+          {allSatTracks.length > 0 && dopMetrics.visibleSats === 0 && (
+            <div className="p-3.5 bg-amber-50 border border-amber-300 rounded-xl text-xs text-amber-950 flex items-center gap-2.5">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>
+                Kutupsal uydu yörüngelerini (Azimut/Yükseklik) ve gerçek DOP matrisini hesaplamak için{' '}
+                <strong>IGS .SP3</strong> veya <strong>RINEX Navigasyon (.nav / .n / .g)</strong> dosyası yükleyiniz.
+                (SNR Serisi ve Oturum Görünümü doğrudan ham gözlem dosyasından okunur.)
+              </span>
+            </div>
+          )}
+
           {/* DOP Metrics Strip */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             <div className="p-3.5 rounded-xl bg-white border border-slate-200 shadow-2xs">
               <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">GÖRÜNÜR UYDU</span>
-              <div className="text-xl font-black text-slate-900 flex items-center gap-1.5 mt-0.5">
+              <div className="text-xl font-black font-mono tabular-nums text-slate-900 flex items-center gap-1.5 mt-0.5">
                 <Satellite className="w-4 h-4 text-sky-600" />
-                <span>{filteredTracks.length} SV</span>
+                <span>{dopMetrics.visibleSats > 0 ? dopMetrics.visibleSats : filteredTracks.length} SV</span>
               </div>
-              <span className="text-[10px] text-emerald-600 font-semibold">Tüm takımyıldızlar</span>
+              <span className="text-[10px] text-emerald-600 font-semibold">
+                {dopMetrics.visibleSats > 0 ? 'Maske üstü yörünge' : 'RINEX gözlem listesi'}
+              </span>
             </div>
 
             <div className="p-3.5 rounded-xl bg-white border border-slate-200 shadow-2xs">
               <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">PDOP (3D KONUM)</span>
-              <div className="text-xl font-black text-slate-900 mt-0.5">
-                {dopMetrics.pdop}
+              <div className="text-xl font-black font-mono tabular-nums text-slate-900 mt-0.5">
+                {dopMetrics.visibleSats >= 4 ? dopMetrics.pdop.toFixed(2) : '—'}
               </div>
               <span className="text-[10px] text-emerald-600 font-semibold">
-                {dopMetrics.pdop <= 2.0 ? 'Mükemmel Geometri' : 'İyi Geometri'}
+                {dopMetrics.visibleSats >= 4
+                  ? (dopMetrics.pdop <= 2.0 ? 'Mükemmel Geometri' : dopMetrics.pdop <= 4.0 ? 'İyi Geometri' : 'Zayıf Geometri')
+                  : 'SP3/NAV Gerekli'}
               </span>
             </div>
 
             <div className="p-3.5 rounded-xl bg-white border border-slate-200 shadow-2xs">
               <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">GDOP (GEOMETRİK)</span>
-              <div className="text-xl font-black text-slate-900 mt-0.5">
-                {dopMetrics.gdop}
+              <div className="text-xl font-black font-mono tabular-nums text-slate-900 mt-0.5">
+                {dopMetrics.visibleSats >= 4 ? dopMetrics.gdop.toFixed(2) : '—'}
               </div>
               <span className="text-[10px] text-slate-500 font-semibold">Saat ve 3D Dağılım</span>
             </div>
 
             <div className="p-3.5 rounded-xl bg-white border border-slate-200 shadow-2xs">
               <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">HDOP (YATAY)</span>
-              <div className="text-xl font-black text-slate-900 mt-0.5">
-                {dopMetrics.hdop}
+              <div className="text-xl font-black font-mono tabular-nums text-slate-900 mt-0.5">
+                {dopMetrics.visibleSats >= 4 ? dopMetrics.hdop.toFixed(2) : '—'}
               </div>
               <span className="text-[10px] text-slate-500 font-semibold">Enlem &amp; Boylam</span>
             </div>
 
             <div className="p-3.5 rounded-xl bg-white border border-slate-200 shadow-2xs">
               <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">VDOP (DÜŞEY)</span>
-              <div className="text-xl font-black text-slate-900 mt-0.5">
-                {dopMetrics.vdop}
+              <div className="text-xl font-black font-mono tabular-nums text-slate-900 mt-0.5">
+                {dopMetrics.visibleSats >= 4 ? dopMetrics.vdop.toFixed(2) : '—'}
               </div>
               <span className="text-[10px] text-slate-500 font-semibold">Elipsoit Yükseklik</span>
             </div>
 
             <div className="p-3.5 rounded-xl bg-white border border-slate-200 shadow-2xs">
               <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">MASKE AÇISI</span>
-              <div className="text-xl font-black text-indigo-700 mt-0.5">
+              <div className="text-xl font-black font-mono tabular-nums text-indigo-700 mt-0.5">
                 {maskAngle}°
               </div>
               <span className="text-[10px] text-indigo-600 font-semibold">BÖHYY standardı</span>
@@ -457,6 +465,7 @@ export const QcSkyplotTab: React.FC<Props> = ({
                     <text x={center + 4} y={center - maskRadius - 2} fontSize="8" fill="#f43f5e" fontWeight="bold">{maskAngle}° Maske</text>
 
                     {filteredTracks.map((track) => {
+                      if (!track.points || track.points.length === 0) return null;
                       const style = getConstellationStyle(track.system);
                       const isHovered = hoveredSatId === track.satId;
                       const isSelected = selectedSatId === track.satId;
@@ -542,6 +551,7 @@ export const QcSkyplotTab: React.FC<Props> = ({
                   <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
                     {filteredTracks.map((sat) => {
                       const snr = sat.avgSnr;
+                      const hasSnr = snr > 0;
                       const isGood = snr >= 40;
                       const isFair = snr >= 34 && snr < 40;
                       return (
@@ -555,17 +565,17 @@ export const QcSkyplotTab: React.FC<Props> = ({
                           }`}
                         >
                           <span className="text-[11px] font-bold font-mono text-slate-800 block">{sat.satId}</span>
-                          <span className={`text-xs font-black block mt-0.5 ${
-                            isGood ? 'text-emerald-600' : isFair ? 'text-amber-600' : 'text-rose-600'
+                          <span className={`text-xs font-black font-mono tabular-nums block mt-0.5 ${
+                            !hasSnr ? 'text-slate-400' : isGood ? 'text-emerald-600' : isFair ? 'text-amber-600' : 'text-rose-600'
                           }`}>
-                            {snr} dB
+                            {hasSnr ? `${snr.toFixed(1)} dB` : 'Veri Yok'}
                           </span>
                           <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden mt-1.5">
                             <div
                               className={`h-full ${
-                                isGood ? 'bg-emerald-500' : isFair ? 'bg-amber-500' : 'bg-rose-500'
+                                !hasSnr ? 'bg-slate-300' : isGood ? 'bg-emerald-500' : isFair ? 'bg-amber-500' : 'bg-rose-500'
                               }`}
-                              style={{ width: `${Math.min(100, (snr / 55) * 100)}%` }}
+                              style={{ width: `${hasSnr ? Math.min(100, (snr / 55) * 100) : 0}%` }}
                             />
                           </div>
                         </div>
@@ -674,31 +684,47 @@ export const QcSkyplotTab: React.FC<Props> = ({
                   <div className="grid grid-cols-2 gap-3 text-xs">
                     <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
                       <span className="text-[10px] text-slate-400 block font-semibold">MAKSİMUM YÜKSEKLİK</span>
-                      <span className="text-base font-extrabold text-slate-900">{activeTrack.maxElevation}°</span>
-                      <span className="text-[10px] text-slate-500 block">Zenith Yaklaşımı</span>
+                      <span className="text-base font-extrabold font-mono tabular-nums text-slate-900">
+                        {activeTrack.hasOrbit ? `${activeTrack.maxElevation.toFixed(1)}°` : '—'}
+                      </span>
+                      <span className="text-[10px] text-slate-500 block">
+                        {activeTrack.hasOrbit ? 'Zenith Yaklaşımı' : 'Yörünge Gerekli'}
+                      </span>
                     </div>
 
                     <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
                       <span className="text-[10px] text-slate-400 block font-semibold">ORTALAMA SNR</span>
-                      <span className="text-base font-extrabold text-emerald-700">{activeTrack.avgSnr} dB-Hz</span>
-                      <span className="text-[10px] text-slate-500 block">Sinyal Kalitesi</span>
+                      <span className="text-base font-extrabold font-mono tabular-nums text-emerald-700">
+                        {activeTrack.avgSnr > 0 ? `${activeTrack.avgSnr.toFixed(1)} dB-Hz` : 'Kayıt Yok'}
+                      </span>
+                      <span className="text-[10px] text-slate-500 block">RINEX Sinyal Kalitesi</span>
                     </div>
 
                     <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
                       <span className="text-[10px] text-slate-400 block font-semibold">GEÇERLİ EPOKLAR</span>
-                      <span className="text-base font-extrabold text-slate-900">{activeTrack.validEpochs} / {activeTrack.totalEpochs}</span>
-                      <span className="text-[10px] text-slate-500 block">Maske Üstü</span>
+                      <span className="text-base font-extrabold font-mono tabular-nums text-slate-900">
+                        {activeTrack.validEpochs} / {activeTrack.totalEpochs}
+                      </span>
+                      <span className="text-[10px] text-slate-500 block">
+                        Faz Kırılması (Slip): {activeTrack.cycleSlips}
+                      </span>
                     </div>
 
                     <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
-                      <span className="text-[10px] text-slate-400 block font-semibold">ÇOK YOLLULUK (MULTIPATH)</span>
-                      <span className={`text-base font-extrabold ${
-                        activeTrack.multipathIndex > 0.4 ? 'text-amber-600' : 'text-emerald-700'
+                      <span className="text-[10px] text-slate-400 block font-semibold">ÇOK YOLLULUK (MP1 / MP2)</span>
+                      <span className={`text-base font-extrabold font-mono tabular-nums ${
+                        (activeTrack.multipathMp1 ?? 0) > 0.6 ? 'text-amber-600' : 'text-emerald-700'
                       }`}>
-                        {(activeTrack.multipathIndex * 100).toFixed(0)}%
+                        {activeTrack.multipathMp1 !== undefined
+                          ? `${activeTrack.multipathMp1.toFixed(3)} m`
+                          : '—'}
                       </span>
                       <span className="text-[10px] text-slate-500 block">
-                        {activeTrack.multipathIndex > 0.4 ? 'Orta Düzey Yansıma' : 'Temiz Sinyal'}
+                        {activeTrack.multipathMp2 !== undefined
+                          ? `MP2: ${activeTrack.multipathMp2.toFixed(3)} m`
+                          : activeTrack.multipathMp1 !== undefined
+                          ? ((activeTrack.multipathMp1 > 0.6) ? 'Orta Yansıma' : 'Temiz Kod Fazı')
+                          : 'Çift Frekans Gerekli'}
                       </span>
                     </div>
                   </div>
@@ -721,20 +747,20 @@ export const QcSkyplotTab: React.FC<Props> = ({
                   </div>
                   <div className="flex justify-between py-1 border-b border-slate-100">
                     <span className="text-slate-500">Koordinat (Y / Sağa):</span>
-                    <span className="font-mono font-bold text-slate-800">
+                    <span className="font-mono tabular-nums font-bold text-slate-800">
                       {(currentStation.projY ?? 0).toFixed(3)} m
                     </span>
                   </div>
                   <div className="flex justify-between py-1 border-b border-slate-100">
                     <span className="text-slate-500">Koordinat (X / Yukarı):</span>
-                    <span className="font-mono font-bold text-slate-800">
+                    <span className="font-mono tabular-nums font-bold text-slate-800">
                       {(currentStation.projX ?? 0).toFixed(3)} m
                     </span>
                   </div>
                   <div className="flex justify-between py-1">
                     <span className="text-slate-500">Anten:</span>
                     <span className="font-mono font-bold text-sky-700 truncate max-w-[180px]">
-                      {currentStation.antenna?.model || 'TRM59800.00 NONE'} ({currentStation.antenna.measuredHeight.toFixed(3)} m)
+                      {currentStation.antenna?.model || '-'} ({currentStation.antenna.measuredHeight.toFixed(3)} m)
                     </span>
                   </div>
                 </div>

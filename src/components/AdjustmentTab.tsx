@@ -44,10 +44,10 @@ export const AdjustmentTab: React.FC<Props> = ({
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <h2 className="text-base font-bold text-slate-900">
-              Serbest Ağ Dengelemesi (3D Gauss-Markov İç Tutarlılık)
+              İç Kısıtlı Serbest Ağ Dengelemesi (İz Minimizasyonu / N⁺)
             </h2>
             <p className="text-xs text-slate-500 mt-1">
-              Minimal datum kısıtıyla ağ içi geometrik tutarlılık analizi, koordinat kestirimi ve Baarda w-testi ile kaba hata denetimi.
+              Moore-Penrose iç kısıtlı (iz minimizasyonu) 3D Gauss-Markov ağ dengelemesi, ANTEX zemin kotu indirgemesi ve Baarda w-testi kaba hata denetimi.
             </p>
           </div>
 

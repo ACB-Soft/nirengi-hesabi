@@ -46,6 +46,7 @@ export const NetworkAdjustmentResultsView: React.FC<Props> = ({
 
   const stationList = Object.values(adjustmentResult.stations);
   const activeStation = stationList.find((s) => s.id === selectedEllipseStationId) || stationList[0];
+  const hasFixedDatum = adjustmentResult.fixedStationIds.length > 0;
 
   const diag = adjustmentResult.matrixDiagnostics;
 
@@ -190,7 +191,7 @@ export const NetworkAdjustmentResultsView: React.FC<Props> = ({
                   </thead>
                   <tbody className="divide-y divide-slate-100 font-mono">
                     {stationList.map((st) => {
-                      const isFixed = st.isFixed.x && st.isFixed.y && st.isFixed.z;
+                      const isFixed = hasFixedDatum && st.isFixed.x && st.isFixed.y && st.isFixed.z;
                       return (
                         <tr key={st.id} className="hover:bg-slate-50/80 transition-colors">
                           <td className="py-2.5 px-3 font-bold font-sans text-slate-900">{st.name}</td>
@@ -200,7 +201,7 @@ export const NetworkAdjustmentResultsView: React.FC<Props> = ({
                                 isFixed ? 'bg-rose-100 text-rose-800' : 'bg-emerald-100 text-emerald-800'
                               }`}
                             >
-                              {isFixed ? 'SABİT (CORS)' : 'DENGELENDİ'}
+                              {isFixed ? 'SABİT (CORS)' : 'SERBEST DENGELİ'}
                             </span>
                           </td>
                           <td className="py-2.5 px-3 text-right text-slate-700">
@@ -263,10 +264,10 @@ export const NetworkAdjustmentResultsView: React.FC<Props> = ({
                   </thead>
                   <tbody className="divide-y divide-slate-100 font-mono">
                     {stationList.map((st) => {
-                      const isFixed = st.isFixed.x && st.isFixed.y && st.isFixed.z;
+                      const isFixed = hasFixedDatum && st.isFixed.x && st.isFixed.y && st.isFixed.z;
                       const isSlant = st.antenna?.heightType === 'slant';
-                      const pcoL1_u = st.antenna?.pcoL1?.u ?? 89.35;
-                      const pcoL2_u = st.antenna?.pcoL2?.u ?? 117.76;
+                      const pcoL1_u = st.antenna?.pcoL1?.u ?? 0;
+                      const pcoL2_u = st.antenna?.pcoL2?.u ?? 0;
                       const apcCalc = calculateAntennaPhaseCenterHeight(
                         st.antenna?.heightType || 'vertical',
                         st.antenna?.measuredHeight || 0,
@@ -290,7 +291,7 @@ export const NetworkAdjustmentResultsView: React.FC<Props> = ({
                                 isFixed ? 'bg-rose-100 text-rose-800' : 'bg-emerald-100 text-emerald-800'
                               }`}
                             >
-                              {isFixed ? 'SABİT' : 'DENGELENDİ'}
+                              {isFixed ? 'SABİT' : 'SERBEST'}
                             </span>
                           </td>
                           <td className="py-2.5 px-3 font-sans text-slate-700 truncate max-w-[140px]" title={st.antenna?.model || '-'}>
@@ -455,11 +456,12 @@ export const NetworkAdjustmentResultsView: React.FC<Props> = ({
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-mono">
                   {stationList.map((st) => {
-                    const isFixed = st.isFixed.x && st.isFixed.y && st.isFixed.z;
+                    const isFixed = hasFixedDatum && st.isFixed.x && st.isFixed.y && st.isFixed.z;
                     const a = st.semiMajor ?? 0;
                     const b = st.semiMinor ?? 0;
-                    const c = st.semiAxisC ?? (st.sigmaH ? st.sigmaH * 1.42 : 0);
+                    const c = st.semiAxisC ?? 0;
                     const isSelected = st.id === (activeStation?.id);
+                    const isWithinLimit = a <= (config.horizontalTolerance * 1000 || 30);
 
                     return (
                       <tr
@@ -489,8 +491,14 @@ export const NetworkAdjustmentResultsView: React.FC<Props> = ({
                           {isFixed ? '0.0' : (st.sigmaH ?? 0).toFixed(1)}
                         </td>
                         <td className="py-2.5 px-3 text-center font-sans">
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                            {isFixed ? 'REFERANS' : '< 30 mm (UYGUN)'}
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              isFixed || isWithinLimit
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : 'bg-rose-100 text-rose-800'
+                            }`}
+                          >
+                            {isFixed ? 'REFERANS' : isWithinLimit ? '< 30 mm (UYGUN)' : 'SINIR AŞILDI'}
                           </span>
                         </td>
                       </tr>
@@ -600,17 +608,17 @@ export const NetworkAdjustmentResultsView: React.FC<Props> = ({
                 {adjustmentResult.totalObservations} &times; {adjustmentResult.totalUnknowns}
               </div>
               <span className="text-[10px] text-slate-500">
-                {diag?.numNonZeroA || adjustmentResult.totalObservations * 2} sıfır-olmayan ({diag?.sparsityPercent.toFixed(1) || '85.2'}% seyreklik)
+                {diag?.numNonZeroA ?? adjustmentResult.totalObservations * 2} sıfır-olmayan (%{(diag?.sparsityPercent ?? 0).toFixed(1)} seyreklik)
               </span>
             </div>
 
             <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
-              <span className="text-slate-400 text-[10px] font-bold uppercase block">Normal Matris N</span>
+              <span className="text-slate-400 text-[10px] font-bold uppercase block">Normal Matris N⁺ (İz Min.)</span>
               <div className="text-base font-black text-slate-900 mt-0.5 font-mono">
                 {adjustmentResult.totalUnknowns} &times; {adjustmentResult.totalUnknowns}
               </div>
               <span className="text-[10px] text-indigo-600 font-semibold">
-                Kondisyon &kappa;(N): {diag?.conditionNumberN.toFixed(2) || '1.14'} (Sağlıklı)
+                Kondisyon &kappa;(N): {diag ? diag.conditionNumberN.toFixed(2) : '—'}
               </span>
             </div>
 
@@ -627,10 +635,10 @@ export const NetworkAdjustmentResultsView: React.FC<Props> = ({
             <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
               <span className="text-slate-400 text-[10px] font-bold uppercase block">Ortalama Fazlalık r̄</span>
               <div className="text-base font-black text-slate-900 mt-0.5 font-mono">
-                {diag?.averageRedundancy.toFixed(3) || (adjustmentResult.dof / adjustmentResult.totalObservations).toFixed(3)}
+                {diag ? diag.averageRedundancy.toFixed(3) : (adjustmentResult.dof / Math.max(1, adjustmentResult.totalObservations)).toFixed(3)}
               </div>
               <span className="text-[10px] text-slate-500">
-                Serbestlik / Ölçü Oranı
+                Maks. Korelasyon ρ: {diag ? diag.maxCorrelation.toFixed(3) : '—'}
               </span>
             </div>
           </div>

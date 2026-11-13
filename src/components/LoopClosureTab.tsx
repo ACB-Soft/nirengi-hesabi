@@ -91,7 +91,15 @@ export const LoopClosureTab: React.FC<Props> = ({
           </div>
           <div className="p-2.5 bg-sky-50 rounded-lg border border-sky-200">
             <div className="text-sky-700 font-medium">Ortalama Bağıl Hassasiyet</div>
-            <div className="text-base font-bold font-mono text-sky-900 mt-0.5">1 : 240,000</div>
+            <div className="text-base font-bold font-mono tabular-nums text-sky-900 mt-0.5">
+              {(() => {
+                if (loopClosures.length === 0) return '—';
+                const sumLenM = loopClosures.reduce((acc, l) => acc + l.totalLengthM, 0);
+                const sumMisM = loopClosures.reduce((acc, l) => acc + l.totalMisclosure / 1000.0, 0);
+                if (sumMisM <= 1e-6) return '1 : ∞';
+                return `1 : ${Math.round(sumLenM / sumMisM).toLocaleString('en-US')}`;
+              })()}
+            </div>
           </div>
         </div>
       </div>

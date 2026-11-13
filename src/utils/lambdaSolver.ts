@@ -1,16 +1,16 @@
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
- * 
- * LAMBDA (Least-squares AMBiguity Decorrelation Adjustment) Solver
- * Teunissen (1995), Delft University of Technology.
- * 
+ *
+ * LAMBDA (Least-squares AMBiguity Decorrelation Adjustment) / MLAMBDA Solver
+ * Teunissen (1995) & Chang, Yang, Zhou (2005).
+ *
  * Implements:
- * 1. Integer Gauss transformation (Z-matrix) for ambiguity decorrelation.
- * 2. LDL^T triangular decomposition.
- * 3. Discrete ellipsoid tree search for integer ambiguity vectors.
+ * 1. Exact Q = L^T * D * L factorization.
+ * 2. Integer Gauss Transformations (IGTs) + adjacent diagonal permutations on (L, D, Z).
+ * 3. Schnorr-Euchner discrete ellipsoid tree search for top-2 integer ambiguity vectors.
  * 4. Ratio test validation (R = Omega2 / Omega1 >= 3.0) for FIX solution.
- * 5. Fixed coordinate vector and 3x3 covariance propagation.
+ * 5. Exact Schur-complement fixed baseline vector and 3x3 covariance propagation.
  */
 
 export interface LambdaResult {
@@ -32,12 +32,181 @@ export interface LambdaResult {
 }
 
 /**
+ * Exact backward factorization Q = L^T * D * L where L is unit lower triangular
+ */
+function ldFactorization(Qorig: number[][]): { L: number[][]; D: number[] } | null {
+  const n = Qorig.length;
+  const Q = Qorig.map((row) => [...row]);
+  const L: number[][] = Array.from({ length: n }, (_, i) =>
+    Array.from({ length: n }, (_, j) => (i === j ? 1.0 : 0.0))
+  );
+  const D = new Array<number>(n).fill(0);
+
+  for (let i = n - 1; i >= 0; i--) {
+    const diag = Q[i][i];
+    if (!isFinite(diag) || diag <= 1e-12) {
+      return null;
+    }
+    D[i] = diag;
+    for (let j = 0; j < i; j++) {
+      const a = Q[i][j];
+      const lij = a / diag;
+      L[i][j] = lij;
+      for (let k = 0; k <= j; k++) {
+        Q[j][k] -= a * L[i][k];
+      }
+    }
+  }
+  return { L, D };
+}
+
+/**
+ * Integer Gauss Transformation & Diagonal Permutation on L^T * D * L
+ */
+function lambdaReduction(L: number[][], D: number[], Z: number[][]): void {
+  const n = D.length;
+
+  const gauss = (i: number, j: number) => {
+    const mu = Math.round(L[i][j]);
+    if (mu === 0) return;
+    for (let k = i; k < n; k++) {
+      L[k][j] -= mu * L[k][i];
+    }
+    for (let k = 0; k < n; k++) {
+      Z[k][j] -= mu * Z[k][i];
+    }
+  };
+
+  const perm = (i: number) => {
+    const lam = L[i + 1][i];
+    const delta = D[i] + lam * lam * D[i + 1];
+    const eta = D[i] / delta;
+    const lamPrime = (lam * D[i + 1]) / delta;
+
+    D[i] = D[i + 1] * eta;
+    D[i + 1] = delta;
+    L[i + 1][i] = lamPrime;
+
+    for (let j = 0; j < i; j++) {
+      const lij = L[i][j];
+      const li1j = L[i + 1][j];
+      L[i][j] = li1j - lam * lij;
+      L[i + 1][j] = eta * lij + lamPrime * li1j;
+    }
+    for (let k = i + 2; k < n; k++) {
+      const tmp = L[k][i];
+      L[k][i] = L[k][i + 1];
+      L[k][i + 1] = tmp;
+    }
+    for (let r = 0; r < n; r++) {
+      const tmp = Z[r][i];
+      Z[r][i] = Z[r][i + 1];
+      Z[r][i + 1] = tmp;
+    }
+  };
+
+  let k = n - 2;
+  let guard = 0;
+  const maxReductionSteps = 10000;
+
+  while (k >= 0 && guard++ < maxReductionSteps) {
+    for (let j = k + 1; j < n; j++) {
+      gauss(j, k);
+    }
+    const delta = D[k] + L[k + 1][k] * L[k + 1][k] * D[k + 1];
+    if (delta + 1e-10 < D[k + 1]) {
+      perm(k);
+      k = Math.min(n - 2, k + 1);
+    } else {
+      k--;
+    }
+  }
+}
+
+/**
+ * Schnorr-Euchner Ellipsoid Search for Best 2 Integer Vectors in Z-space
+ */
+function lambdaSearch(
+  L: number[][],
+  D: number[],
+  zHat: number[]
+): { bestZ: number[]; secondZ: number[]; omega1: number; omega2: number } {
+  const n = zHat.length;
+  const z = new Array<number>(n).fill(0);
+  const zb = new Array<number>(n).fill(0);
+  const v = new Array<number>(n).fill(0);
+  const step = new Array<number>(n).fill(0);
+  const dist = new Array<number>(n + 1).fill(0);
+
+  let bestZ = zHat.map(Math.round);
+  let secondZ = zHat.map(Math.round);
+  let omega1 = Infinity;
+  let omega2 = Infinity;
+  let maxdist = Infinity;
+
+  const computeCondCenter = (level: number): number => {
+    let c = zHat[level];
+    for (let j = level + 1; j < n; j++) {
+      c -= L[j][level] * v[j];
+    }
+    return c;
+  };
+
+  let k = n - 1;
+  dist[n] = 0;
+  zb[k] = zHat[k];
+  z[k] = Math.round(zb[k]);
+  v[k] = zb[k] - z[k];
+  step[k] = v[k] >= 0 ? 1 : -1;
+
+  let searchSteps = 0;
+  const maxSearchSteps = 80000;
+
+  while (searchSteps++ < maxSearchSteps) {
+    const newDist = dist[k + 1] + (v[k] * v[k]) / D[k];
+
+    if (newDist < maxdist) {
+      if (k !== 0) {
+        dist[k] = newDist;
+        k--;
+        zb[k] = computeCondCenter(k);
+        z[k] = Math.round(zb[k]);
+        v[k] = zb[k] - z[k];
+        step[k] = v[k] >= 0 ? 1 : -1;
+      } else {
+        if (newDist < omega1) {
+          omega2 = omega1;
+          secondZ = [...bestZ];
+          omega1 = newDist;
+          bestZ = [...z];
+        } else if (newDist < omega2) {
+          omega2 = newDist;
+          secondZ = [...z];
+        }
+        if (isFinite(omega2)) {
+          maxdist = omega2;
+        }
+        // Try next integer at level 0
+        z[0] += step[0];
+        v[0] = zb[0] - z[0];
+        step[0] = -step[0] - (step[0] > 0 ? 1 : -1);
+      }
+    } else {
+      if (k === n - 1) {
+        break;
+      }
+      k++;
+      z[k] += step[k];
+      v[k] = zb[k] - z[k];
+      step[k] = -step[k] - (step[k] > 0 ? 1 : -1);
+    }
+  }
+
+  return { bestZ, secondZ, omega1, omega2 };
+}
+
+/**
  * Solves LAMBDA Integer Ambiguity Resolution
- * @param aHat Float ambiguity vector (length n)
- * @param Qaa Float ambiguity covariance matrix (n x n)
- * @param bHat Float baseline coordinates [dX, dY, dZ]
- * @param Qba Cross-covariance matrix between baseline and ambiguities (3 x n)
- * @param Qbb Float baseline covariance matrix (3 x 3)
  */
 export function solveLambda(
   aHat: number[],
@@ -58,192 +227,71 @@ export function solveLambda(
     };
   }
 
-  // 1. Copy Qaa and aHat
-  const Q = Qaa.map((row) => [...row]);
-  const a = [...aHat];
+  // Symmetrize Qaa cleanly
+  const Qsym: number[][] = Array.from({ length: n }, (_, i) =>
+    Array.from({ length: n }, (_, j) => 0.5 * (Qaa[i][j] + Qaa[j][i]))
+  );
 
-  // Initialize integer Z matrix as identity (n x n)
+  const ld = ldFactorization(Qsym);
+  if (!ld) {
+    return {
+      status: 'FLOAT',
+      ratio: 1.0,
+      bestAmbiguities: aHat.map(Math.round),
+      secondBestAmbiguities: aHat.map(Math.round),
+      omega1: 0,
+      omega2: 0,
+    };
+  }
+
+  const { L, D } = ld;
   const Z: number[][] = Array.from({ length: n }, (_, i) =>
     Array.from({ length: n }, (_, j) => (i === j ? 1 : 0))
   );
 
-  // 2. Perform Decorrelation (Integer Gauss Transformation)
-  let changed = true;
-  let iter = 0;
-  const maxIter = 100;
-
-  while (changed && iter < maxIter) {
-    changed = false;
-    iter++;
-
-    for (let i = 0; i < n - 1; i++) {
-      for (let j = i + 1; j < n; j++) {
-        // Integer Gauss transformation factor mu = round(Q[i][j] / Q[j][j])
-        if (Math.abs(Q[j][j]) > 1e-12) {
-          const mu = Math.round(Q[i][j] / Q[j][j]);
-          if (mu !== 0) {
-            changed = true;
-            // Q = Z_ij^T * Q * Z_ij
-            for (let k = 0; k < n; k++) {
-              Q[i][k] -= mu * Q[j][k];
-            }
-            for (let k = 0; k < n; k++) {
-              Q[k][i] -= mu * Q[k][j];
-            }
-            // Update Z matrix
-            for (let k = 0; k < n; k++) {
-              Z[k][i] -= mu * Z[k][j];
-            }
-          }
-        }
-      }
-    }
-
-    // Permutation / sorting step to ensure diagonal monotonicity (d_1 <= d_2 <= ... <= d_n)
-    for (let i = n - 2; i >= 0; i--) {
-      if (Q[i][i] > Q[i + 1][i + 1] * 1.05) {
-        // Swap rows and columns i and i+1
-        changed = true;
-        for (let k = 0; k < n; k++) {
-          const tmp = Q[i][k];
-          Q[i][k] = Q[i + 1][k];
-          Q[i + 1][k] = tmp;
-        }
-        for (let k = 0; k < n; k++) {
-          const tmp = Q[k][i];
-          Q[k][i] = Q[k][i + 1];
-          Q[k][i + 1] = tmp;
-        }
-        for (let k = 0; k < n; k++) {
-          const tmp = Z[k][i];
-          Z[k][i] = Z[k][i + 1];
-          Z[k][i + 1] = tmp;
-        }
-      }
-    }
-  }
+  // Decorrelate (L, D, Z)
+  lambdaReduction(L, D, Z);
 
   // Transform float ambiguities: zHat = Z^T * aHat
-  const zHat = new Array(n).fill(0);
+  const zHat = new Array<number>(n).fill(0);
   for (let i = 0; i < n; i++) {
     let sum = 0;
     for (let j = 0; j < n; j++) {
-      sum += Z[j][i] * a[j];
+      sum += Z[j][i] * aHat[j];
     }
     zHat[i] = sum;
   }
 
-  // 3. LDL^T Decomposition of decorrelated matrix Q: Q = L * D * L^T
-  const L: number[][] = Array.from({ length: n }, (_, i) =>
-    Array.from({ length: n }, (_, j) => (i === j ? 1 : 0))
-  );
-  const D = new Array(n).fill(0);
+  // Discrete ellipsoid search for top 2 integer candidates
+  const { bestZ, secondZ, omega1, omega2 } = lambdaSearch(L, D, zHat);
 
-  for (let i = n - 1; i >= 0; i--) {
-    D[i] = Q[i][i];
-    if (D[i] <= 0) D[i] = 1e-6; // guard against singularity
-    for (let j = 0; j < i; j++) {
-      L[i][j] = Q[i][j] / D[i];
-      for (let k = 0; k <= j; k++) {
-        Q[j][k] -= L[i][j] * L[i][k] * D[i];
-      }
-    }
+  // Back-transform to original ambiguity space: Z^T * aCheck = zCheck
+  const ZT = transposeMatrix(Z);
+  const aCheck1 = solveLinearSystem(ZT, bestZ);
+  const aCheck2 = solveLinearSystem(ZT, secondZ);
+
+  if (!isFinite(omega1) || !isFinite(omega2) || omega2 <= omega1) {
+    return {
+      status: 'FLOAT',
+      ratio: 1.0,
+      bestAmbiguities: aCheck1.map(Math.round),
+      secondBestAmbiguities: aCheck2.map(Math.round),
+      omega1: isFinite(omega1) ? omega1 : 0,
+      omega2: isFinite(omega2) ? omega2 : 0,
+    };
   }
 
-  // 4. Discrete Ellipsoid Tree Search for Best 2 Candidates
-  // Initial search radius based on rounded float vector
-  const zRound = zHat.map(Math.round);
-  let chi2 = 0;
-  for (let i = 0; i < n; i++) {
-    const diff = zHat[i] - zRound[i];
-    chi2 += (diff * diff) / D[i];
-  }
-  chi2 = Math.max(chi2 * 2.5, 30.0);
-
-  let bestZ: number[] = [...zRound];
-  let secondZ: number[] = [...zRound];
-  let omega1 = Infinity;
-  let omega2 = Infinity;
-
-  // Depth-first search through ambiguity ellipsoid
-  const currentZ = new Array(n).fill(0);
-  const dist = new Array(n + 1).fill(0);
-  const end = new Array(n).fill(0);
-  const step = new Array(n).fill(0);
-
-  let k = n - 1;
-  dist[k] = 0;
-  currentZ[k] = Math.round(zHat[k]);
-  step[k] = zHat[k] >= currentZ[k] ? 1 : -1;
-
-  let candidatesFound = 0;
-  let searchSteps = 0;
-  const maxSearchSteps = 20000;
-
-  while (searchSteps++ < maxSearchSteps) {
-    let newDist = dist[k + 1] || 0;
-    let resid = zHat[k] - currentZ[k];
-    for (let j = k + 1; j < n; j++) {
-      resid += L[j][k] * (zHat[j] - currentZ[j]);
-    }
-    newDist += (resid * resid) / D[k];
-
-    if (newDist < chi2) {
-      if (k !== 0) {
-        dist[k] = newDist;
-        k--;
-        currentZ[k] = Math.round(zHat[k]);
-        step[k] = zHat[k] >= currentZ[k] ? 1 : -1;
-      } else {
-        // Full vector found
-        candidatesFound++;
-        if (newDist < omega1) {
-          omega2 = omega1;
-          secondZ = [...bestZ];
-          omega1 = newDist;
-          bestZ = [...currentZ];
-          chi2 = omega2; // Shrink search radius
-        } else if (newDist < omega2) {
-          omega2 = newDist;
-          secondZ = [...currentZ];
-          chi2 = omega2;
-        }
-
-        currentZ[0] += step[0];
-        step[0] = -step[0] - (step[0] > 0 ? 1 : -1);
-      }
-    } else {
-      k++;
-      if (k === n) break; // Finished search
-      currentZ[k] += step[k];
-      step[k] = -step[k] - (step[k] > 0 ? 1 : -1);
-    }
-  }
-
-  // 5. Transform back to original ambiguity space: aCheck = Z^-T * zCheck
-  // Because det(Z) = +/- 1, we can solve Z^T * aCheck = zCheck via Gaussian elimination
-  const aCheck1 = solveLinearSystem(transposeMatrix(Z), bestZ);
-  const aCheck2 = solveLinearSystem(transposeMatrix(Z), secondZ);
-
-  // 6. Validation Ratio Test: R = Omega2 / Omega1
-  // If only 1 candidate found or omega1 near 0:
-  if (omega1 < 1e-7) omega1 = 1e-7;
-  if (!isFinite(omega2) || omega2 <= omega1) {
-    omega2 = omega1 * (3.5 + (n > 5 ? 1.5 : 0.5));
-  }
-
-  const ratio = Math.min(99.9, Math.round((omega2 / omega1) * 10) / 10);
+  const safeOmega1 = Math.max(1e-9, omega1);
+  const ratio = Math.min(99.9, Math.round((omega2 / safeOmega1) * 10) / 10);
   const status: 'FIX' | 'FLOAT' = ratio >= 3.0 ? 'FIX' : 'FLOAT';
 
-  // 7. Update Baseline Coordinates and Covariance if float baseline provided
   let fixedBaselineDelta: [number, number, number] | undefined;
   let fixedCovariance: LambdaResult['fixedCovariance'] | undefined;
 
   if (bHat && Qba && Qbb && status === 'FIX') {
-    // bCheck = bHat - Qba * inv(Qaa) * (aHat - aCheck)
-    const invQaa = invertMatrix(Qaa);
+    const invQaa = invertMatrix(Qsym);
     if (invQaa) {
-      const aDiff = aHat.map((val, idx) => val - aCheck1[idx]);
+      const aDiff = aHat.map((val, idx) => val - Math.round(aCheck1[idx]));
       const invDiff = multiplyMatrixVector(invQaa, aDiff);
       const bCorr = multiplyMatrixVector(Qba, invDiff);
 
@@ -253,17 +301,16 @@ export function solveLambda(
         bHat[2] - bCorr[2],
       ];
 
-      // Q_bCheck = Qbb - Qba * inv(Qaa) * Qab
       const Qab = transposeMatrix(Qba);
       const invQab = multiplyMatrices(invQaa, Qab);
       const qReduction = multiplyMatrices(Qba, invQab);
 
-      const qxx = Math.max(1e-7, (Qbb[0][0] - qReduction[0][0]) * 0.25);
-      const qyy = Math.max(1e-7, (Qbb[1][1] - qReduction[1][1]) * 0.25);
-      const qzz = Math.max(1e-7, (Qbb[2][2] - qReduction[2][2]) * 0.35);
-      const qxy = (Qbb[0][1] - qReduction[0][1]) * 0.25;
-      const qyz = (Qbb[1][2] - qReduction[1][2]) * 0.25;
-      const qzx = (Qbb[2][0] - qReduction[2][0]) * 0.25;
+      const qxx = Math.max(1e-9, Qbb[0][0] - qReduction[0][0]);
+      const qyy = Math.max(1e-9, Qbb[1][1] - qReduction[1][1]);
+      const qzz = Math.max(1e-9, Qbb[2][2] - qReduction[2][2]);
+      const qxy = Qbb[0][1] - qReduction[0][1];
+      const qyz = Qbb[1][2] - qReduction[1][2];
+      const qzx = Qbb[2][0] - qReduction[2][0];
 
       fixedCovariance = { qxx, qyy, qzz, qxy, qyz, qzx };
     }
@@ -281,7 +328,6 @@ export function solveLambda(
   };
 }
 
-// Matrix helper utilities
 function transposeMatrix(A: number[][]): number[][] {
   const m = A.length;
   const n = A[0].length;

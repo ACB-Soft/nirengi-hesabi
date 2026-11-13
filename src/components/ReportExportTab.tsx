@@ -132,7 +132,7 @@ export const ReportExportTab: React.FC<Props> = ({
       showNotification('Tam Proje Arşivi (.zip: JSON + Ham RINEX + Rapor) HMAC korumalı olarak başarıyla indirildi.');
     } catch (err: any) {
       console.error('ZIP export error:', err);
-      alert(`Arşiv oluşturma hatası: ${err?.message || err}`);
+      showNotification(`Arşiv oluşturma hatası: ${err?.message || err}`);
     } finally {
       setIsExportingZip(false);
       setZipProgressText('');
@@ -152,7 +152,7 @@ export const ReportExportTab: React.FC<Props> = ({
     reportTxt += `İdare / Kurum       : ${config.institution}\n`;
     reportTxt += `Koordinat Sistemi   : ${config.crsSystem} (DOM: ${config.dom} Derece)\n`;
     reportTxt += `Referans Elipsoidi  : ${config.ellipsoid} (a=6378137.0 m, 1/f=298.257222101)\n`;
-    reportTxt += `Dengeleme Modu      : 3D Serbest Ağ Dengelemesi (İç Tutarlılık)\n`;
+    reportTxt += `Dengeleme Modu      : İz Minimizasyonlu 3D Serbest Ağ Dengelemesi (N+)\n`;
     reportTxt += `Hesaplama Tarihi    : ${new Date().toLocaleString('tr-TR')}\n\n`;
 
     reportTxt += `DENGELEME İSTATİSTİKLERİ:\n`;
@@ -512,7 +512,7 @@ export const ReportExportTab: React.FC<Props> = ({
           <div>
             <span className="text-slate-500 block text-[10px] font-semibold">Dengeleme Modu:</span>
             <strong className="text-slate-900">
-              3D Serbest Ağ Dengelemesi
+              İz Minimizasyonlu 3D Serbest Ağ (N⁺)
             </strong>
           </div>
         </div>
@@ -607,9 +607,10 @@ export const ReportExportTab: React.FC<Props> = ({
 
             {/* Criteria 3: Max Semi-Major Axis */}
             {(() => {
+              const hasFixedDatum = adjustmentResult.fixedStationIds.length > 0;
               const maxA = Math.max(
                 ...Object.values(adjustmentResult.stations)
-                  .filter((s) => !(s.isFixed.x && s.isFixed.y && s.isFixed.z))
+                  .filter((s) => !(hasFixedDatum && s.isFixed.x && s.isFixed.y && s.isFixed.z))
                   .map((s) => s.semiMajor ?? 0),
                 0
               );
@@ -680,10 +681,11 @@ export const ReportExportTab: React.FC<Props> = ({
               </thead>
               <tbody className="divide-y divide-slate-200">
                 {Object.values(adjustmentResult.stations).map((st) => {
-                  const isFixed = st.isFixed.x && st.isFixed.y && st.isFixed.z;
+                  const hasFixedDatum = adjustmentResult.fixedStationIds.length > 0;
+                  const isFixed = hasFixedDatum && st.isFixed.x && st.isFixed.y && st.isFixed.z;
                   const a = st.semiMajor ?? 0;
                   const b = st.semiMinor ?? 0;
-                  const c = st.semiAxisC ?? (st.sigmaH ? st.sigmaH * 1.42 : 0);
+                  const c = st.semiAxisC ?? 0;
                   const isAccepted = isFixed || a <= 30.0;
 
                   return (
@@ -695,7 +697,7 @@ export const ReportExportTab: React.FC<Props> = ({
                       <td className="p-2 text-right font-bold text-sky-900">
                         {(st.adjustedProjX ?? st.projX).toFixed(4)}
                       </td>
-                      <td className="p-2 text-right">{(st.adjustedH ?? st.h).toFixed(4)}</td>
+                      <td className="p-2 text-right">{(st.groundH ?? st.adjustedH ?? st.h).toFixed(4)}</td>
                       <td className="p-2 text-right text-slate-600">{(st.sigmaEast ?? st.sigmaX ?? 0).toFixed(1)}</td>
                       <td className="p-2 text-right text-slate-600">{(st.sigmaNorth ?? st.sigmaY ?? 0).toFixed(1)}</td>
                       <td className="p-2 text-right font-bold text-slate-900">

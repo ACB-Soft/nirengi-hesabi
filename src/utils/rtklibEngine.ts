@@ -1,25 +1,24 @@
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
- * 
- * RTKLIB Core Engine & Double Difference (DD) Baseline Processor (Faz 3)
- * Implements rigorous carrier-phase Double Difference equations, Pivot satellite selection,
- * LAMBDA (Least-squares AMBiguity Decorrelation Adjustment) algorithm,
- * and 3x3 positive-definite variance-covariance matrix formulation.
- * 
- * Conforms to RTKLIB (rnx2rtkp) & NGS / BÖHYY standards.
+ *
+ * RTKLIB-Standard Multi-GNSS Double Difference (DD) Baseline Orchestrator
+ * Coordinates asynchronous Web Worker (with seamless main-thread fallback),
+ * forwards SP3 + Broadcast ephemeris + Klobuchar Iono + cached RINEX File handles,
+ * and derives ANTEX / marker-to-marker baseline vectors and covariance matrices.
  */
 
 import { BaselineVector, Station, SolutionStatus } from '../types/gnss';
 import { degToRad, calculateCorrectedAntennaHeight } from './geodesy';
 import {
-  solveNativeBaseline,
+  PreparedStationData,
+  WorkerBaselineJob,
   WorkerInputMessage,
   WorkerProgressMessage,
-  WorkerSuccessMessage,
-  WorkerBaselineJob,
+  solveNativeBaselineAsync,
 } from '../workers/gnssBaselineWorker';
-import { BroadcastEphemeris } from './rinexNavParser';
+import { BroadcastEphemeris, IonoParameters, Sp3OrbitData } from './rinexNavParser';
+import { getCachedFilesRecord } from './opfsStorage';
 
 export interface RtklibProcessingOptions {
   frequencies?: 'L1' | 'L1+L2' | 'Multi-GNSS';
@@ -28,8 +27,10 @@ export interface RtklibProcessingOptions {
   dynamics?: 'STATIC' | 'KINEMATIC';
   ionoOption?: 'OFF' | 'IONO_FREE';
   tropoOption?: 'SAASTAMOINEN';
-  snrMaskDeg?: number; // dB-Hz threshold
+  snrMaskDeg?: number;
   ephemerisMap?: Record<string, BroadcastEphemeris[]>;
+  sp3Orbit?: Sp3OrbitData | null;
+  iono?: IonoParameters;
 }
 
 export interface DoubleDifferenceSolution {
@@ -58,30 +59,33 @@ export interface DoubleDifferenceSolution {
     ryz: number;
     rzx: number;
   };
-  status: SolutionStatus; // FIX or FLOAT
+  status: SolutionStatus;
   ratio: number;
   pivotSatellite: string;
   commonSatellites: string[];
   rmsMeters: number;
   durationMin: number;
   pdop: number;
+  orbitSource?: 'SP3' | 'NAV';
+  frequencyMode?: string;
+  commonEpochs?: number;
+  cycleSlips?: number;
+  diagnostics?: string;
 }
 
 /**
  * Computes antenna Phase Center Offset (PCO) + ARP Height in ECEF frame
  */
 export function computeAntennaEcefOffset(st: Station): { dx: number; dy: number; dz: number } {
-  const pcoL1 = st.antenna.pcoL1 || { n: 0.65, e: 1.35, u: 89.35 };
-  const pcoL2 = st.antenna.pcoL2 || { n: -0.24, e: 0.00, u: 117.76 };
+  const pcoL1 = st.antenna.pcoL1 || { n: 0, e: 0, u: 0 };
+  const pcoL2 = st.antenna.pcoL2 || { n: 0, e: 0, u: 0 };
 
-  // Ionosphere-Free combination for L1/L2 conforming to IGS GPS standards
   const c1 = 2.545728;
   const c2 = 1.545728;
-  const pcoE_m = (c1 * pcoL1.e - c2 * pcoL2.e) / 1000.0;
-  const pcoN_m = (c1 * pcoL1.n - c2 * pcoL2.n) / 1000.0;
+  const pcoE_m = (c1 * pcoL1.e - c2 * pcoL2.e) / 1000.0 + (st.antenna.deltaE || 0);
+  const pcoN_m = (c1 * pcoL1.n - c2 * pcoL2.n) / 1000.0 + (st.antenna.deltaN || 0);
   const pcoU_m = (c1 * pcoL1.u - c2 * pcoL2.u) / 1000.0;
 
-  // Pure vertical ARP height
   const arpHeightM = calculateCorrectedAntennaHeight(
     st.antenna.heightType,
     st.antenna.measuredHeight,
@@ -105,33 +109,41 @@ export function computeAntennaEcefOffset(st: Station): { dx: number; dy: number;
 }
 
 /**
- * Solves a single Double Difference Baseline between Reference (Base) and Rover
- * using native LAMBDA integer ambiguity resolution.
+ * Solves a single Double Difference Baseline asynchronously from real RINEX files in OPFS
  */
-export function solveDoubleDifferenceBaseline(
+export async function solveDoubleDifferenceBaselineAsync(
   fromStn: Station,
   toStn: Station,
   options: RtklibProcessingOptions = {}
-): DoubleDifferenceSolution {
-  const nativeSol = solveNativeBaseline(
+): Promise<DoubleDifferenceSolution> {
+  const stationFiles = getCachedFilesRecord();
+  const nativeSol = await solveNativeBaselineAsync(
     fromStn,
     toStn,
     `BASE_${fromStn.id}_${toStn.id}`,
-    options.ephemerisMap,
     {
+      ephemerisMap: options.ephemerisMap,
+      sp3Orbit: options.sp3Orbit,
+      iono: options.iono,
+      stationFiles,
       elevationMaskDeg: options.elevationMaskDeg ?? 10,
       ratioThreshold: options.ratioThreshold ?? 3.0,
+      frequencies: options.frequencies ?? 'L1+L2',
     }
   );
 
-  const sigmaX = Math.sqrt(nativeSol.qxx) * 1000.0;
-  const sigmaY = Math.sqrt(nativeSol.qyy) * 1000.0;
-  const sigmaZ = Math.sqrt(nativeSol.qzz) * 1000.0;
+  const sigmaX = Math.sqrt(Math.max(1e-12, nativeSol.qxx)) * 1000.0;
+  const sigmaY = Math.sqrt(Math.max(1e-12, nativeSol.qyy)) * 1000.0;
+  const sigmaZ = Math.sqrt(Math.max(1e-12, nativeSol.qzz)) * 1000.0;
   const sigmaSpatial = Math.sqrt(sigmaX * sigmaX + sigmaY * sigmaY + sigmaZ * sigmaZ);
 
-  const rxy = nativeSol.qxy / Math.sqrt(nativeSol.qxx * nativeSol.qyy);
-  const ryz = nativeSol.qyz / Math.sqrt(nativeSol.qyy * nativeSol.qzz);
-  const rzx = nativeSol.qzx / Math.sqrt(nativeSol.qzz * nativeSol.qxx);
+  const denomXY = Math.sqrt(Math.max(1e-18, nativeSol.qxx * nativeSol.qyy));
+  const denomYZ = Math.sqrt(Math.max(1e-18, nativeSol.qyy * nativeSol.qzz));
+  const denomZX = Math.sqrt(Math.max(1e-18, nativeSol.qzz * nativeSol.qxx));
+
+  const rxy = nativeSol.qxy / denomXY;
+  const ryz = nativeSol.qyz / denomYZ;
+  const rzx = nativeSol.qzx / denomZX;
 
   const fromSats = new Set(fromStn.occupation?.satellites?.map((s) => s.satId) || []);
   const toSats = new Set(toStn.occupation?.satellites?.map((s) => s.satId) || []);
@@ -159,22 +171,27 @@ export function solveDoubleDifferenceBaseline(
       sigmaSpatial: Math.round(sigmaSpatial * 10) / 10,
     },
     correlation: {
-      rxy: Math.round((isNaN(rxy) ? 0.2 : rxy) * 100) / 100,
-      ryz: Math.round((isNaN(ryz) ? 0.2 : ryz) * 100) / 100,
-      rzx: Math.round((isNaN(rzx) ? 0.2 : rzx) * 100) / 100,
+      rxy: Math.round((isFinite(rxy) ? rxy : 0) * 100) / 100,
+      ryz: Math.round((isFinite(ryz) ? ryz : 0) * 100) / 100,
+      rzx: Math.round((isFinite(rzx) ? rzx : 0) * 100) / 100,
     },
     status: nativeSol.solutionType,
     ratio: nativeSol.ratio,
-    pivotSatellite: 'G14',
-    commonSatellites: commonSats.length >= 4 ? commonSats : ['G01', 'G03', 'G08', 'G14', 'G17', 'G22', 'R02', 'R07'],
+    pivotSatellite: nativeSol.pivotSatellite || '-',
+    commonSatellites: commonSats,
     rmsMeters: nativeSol.rms,
     durationMin: nativeSol.durationMin,
     pdop: nativeSol.pdop,
+    orbitSource: nativeSol.orbitSource,
+    frequencyMode: nativeSol.frequencyMode,
+    commonEpochs: nativeSol.commonEpochs,
+    cycleSlips: nativeSol.cycleSlips,
+    diagnostics: nativeSol.diagnostics,
   };
 }
 
 /**
- * Builds standard network baseline topology (Radial Base-Rover + Base-Base + Rover-Rover)
+ * Builds standard closed-loop network baseline topology (CORS-Rover + CORS-CORS + Rover-Rover)
  */
 export function buildNetworkBaselineJobs(stations: Record<string, Station>): WorkerBaselineJob[] {
   const stationList = Object.values(stations);
@@ -186,28 +203,24 @@ export function buildNetworkBaselineJobs(stations: Record<string, Station>): Wor
   const pairsToProcess: Array<[Station, Station]> = [];
   const processedKeys = new Set<string>();
 
-  // 1. Radial Baselines: Connect each Base (CORS) to each Rover
   for (const base of baseStations) {
     for (const rover of roverStations) {
       pairsToProcess.push([base, rover]);
     }
   }
 
-  // 2. Control Baselines: Connect Bases to each other
   for (let i = 0; i < baseStations.length; i++) {
     for (let j = i + 1; j < baseStations.length; j++) {
       pairsToProcess.push([baseStations[i], baseStations[j]]);
     }
   }
 
-  // 3. Rover-to-Rover Baselines: Connect adjacent rovers to close 3D triangles
   for (let i = 0; i < roverStations.length; i++) {
     for (let j = i + 1; j < roverStations.length; j++) {
       pairsToProcess.push([roverStations[i], roverStations[j]]);
     }
   }
 
-  // Fallback if all points are rovers or all are bases
   if (pairsToProcess.length === 0) {
     for (let i = 0; i < stationList.length; i++) {
       for (let j = i + 1; j < stationList.length; j++) {
@@ -236,27 +249,7 @@ export function buildNetworkBaselineJobs(stations: Record<string, Station>): Wor
 }
 
 /**
- * Synchronous Batch Process for all Network Baselines
- */
-export function batchProcessNetworkBaselines(
-  stations: Record<string, Station>,
-  options: RtklibProcessingOptions = {}
-): BaselineVector[] {
-  const jobs = buildNetworkBaselineJobs(stations);
-  return jobs.map((job) =>
-    solveNativeBaseline(
-      job.fromStn,
-      job.toStn,
-      job.id,
-      options.ephemerisMap,
-      options
-    )
-  );
-}
-
-/**
  * Asynchronous Multithreaded Web Worker Network Baseline Processor
- * Reports live streaming progress callbacks during calculation.
  */
 export async function batchProcessNetworkBaselinesAsync(
   stations: Record<string, Station>,
@@ -266,75 +259,88 @@ export async function batchProcessNetworkBaselinesAsync(
   const jobs = buildNetworkBaselineJobs(stations);
   if (jobs.length === 0) return [];
 
-  // Try instantiating Web Worker
-  try {
-    return await new Promise<BaselineVector[]>((resolve, reject) => {
-      const worker = new Worker(
-        new URL('../workers/gnssBaselineWorker.ts', import.meta.url),
-        { type: 'module' }
-      );
+  const stationFiles = getCachedFilesRecord();
 
-      worker.onmessage = (e: MessageEvent<any>) => {
-        const msg = e.data;
-        if (msg.type === 'PROGRESS') {
-          if (onProgress) onProgress(msg);
-        } else if (msg.type === 'SUCCESS') {
+  // Attempt Web Worker execution
+  if (typeof Worker !== 'undefined') {
+    try {
+      return await new Promise<BaselineVector[]>((resolve, reject) => {
+        const worker = new Worker(
+          new URL('../workers/gnssBaselineWorker.ts', import.meta.url),
+          { type: 'module' }
+        );
+
+        worker.onmessage = (e: MessageEvent<any>) => {
+          const msg = e.data;
+          if (msg.type === 'PROGRESS') {
+            if (onProgress) onProgress(msg);
+          } else if (msg.type === 'SUCCESS') {
+            worker.terminate();
+            resolve(msg.results);
+          } else if (msg.type === 'ERROR') {
+            worker.terminate();
+            reject(new Error(msg.error));
+          }
+        };
+
+        worker.onerror = (err) => {
           worker.terminate();
-          resolve(msg.results);
-        } else if (msg.type === 'ERROR') {
-          worker.terminate();
-          reject(new Error(msg.error));
-        }
-      };
+          reject(err);
+        };
 
-      worker.onerror = (err) => {
-        worker.terminate();
-        reject(err);
-      };
+        const startMsg: WorkerInputMessage = {
+          type: 'START_BATCH_PROCESSING',
+          jobs,
+          ephemerisMap: options.ephemerisMap,
+          sp3Orbit: options.sp3Orbit,
+          iono: options.iono,
+          stationFiles,
+          options: {
+            elevationMaskDeg: options.elevationMaskDeg ?? 10,
+            ratioThreshold: options.ratioThreshold ?? 3.0,
+            frequencies: options.frequencies ?? 'L1+L2',
+          },
+        };
 
-      const startMsg: WorkerInputMessage = {
-        type: 'START_BATCH_PROCESSING',
-        jobs,
-        ephemerisMap: options.ephemerisMap,
-        options: {
-          elevationMaskDeg: options.elevationMaskDeg ?? 10,
-          ratioThreshold: options.ratioThreshold ?? 3.0,
-        },
-      };
-
-      worker.postMessage(startMsg);
-    });
-  } catch (err) {
-    console.warn('Worker initialization fallback to in-thread calculation:', err);
-    // Reliable in-thread fallback with simulated progressive yields
-    const results: BaselineVector[] = [];
-    for (let i = 0; i < jobs.length; i++) {
-      const job = jobs[i];
-      const sol = solveNativeBaseline(
-        job.fromStn,
-        job.toStn,
-        job.id,
-        options.ephemerisMap,
-        options
-      );
-      results.push(sol);
-
-      if (onProgress) {
-        onProgress({
-          type: 'PROGRESS',
-          currentIdx: i + 1,
-          totalJobs: jobs.length,
-          percent: Math.round(((i + 1) / jobs.length) * 100),
-          currentBaselineId: job.id,
-          fromName: job.fromStn.name,
-          toName: job.toStn.name,
-          status: sol.solutionType,
-          ratio: sol.ratio,
-        });
-      }
-      // Small pause to yield to browser UI paint
-      await new Promise((r) => setTimeout(r, 40));
+        worker.postMessage(startMsg);
+      });
+    } catch (err) {
+      console.warn('Worker initialization fallback to async main thread:', err);
     }
-    return results;
   }
+
+  // Reliable main-thread async fallback
+  const results: BaselineVector[] = [];
+  const stationCache = new Map<string, PreparedStationData | null>();
+
+  for (let i = 0; i < jobs.length; i++) {
+    const job = jobs[i];
+    const sol = await solveNativeBaselineAsync(job.fromStn, job.toStn, job.id, {
+      ephemerisMap: options.ephemerisMap,
+      sp3Orbit: options.sp3Orbit,
+      iono: options.iono,
+      stationFiles,
+      stationCache,
+      elevationMaskDeg: options.elevationMaskDeg,
+      ratioThreshold: options.ratioThreshold,
+      frequencies: options.frequencies,
+    });
+    results.push(sol);
+
+    if (onProgress) {
+      onProgress({
+        type: 'PROGRESS',
+        currentIdx: i + 1,
+        totalJobs: jobs.length,
+        percent: Math.round(((i + 1) / jobs.length) * 100),
+        currentBaselineId: job.id,
+        fromName: job.fromStn.name,
+        toName: job.toStn.name,
+        status: sol.solutionType,
+        ratio: sol.ratio,
+      });
+    }
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  return results;
 }

@@ -8,9 +8,9 @@
  */
 
 import React, { useState, useMemo } from 'react';
-import { BaselineVector, Station } from '../types/gnss';
+import { BaselineVector, Station, IgsSp3File } from '../types/gnss';
 import {
-  solveDoubleDifferenceBaseline,
+  solveDoubleDifferenceBaselineAsync,
   DoubleDifferenceSolution,
 } from '../utils/rtklibEngine';
 import {
@@ -38,13 +38,18 @@ import {
   Orbit,
 } from 'lucide-react';
 import { WorkerProgressMessage } from '../workers/gnssBaselineWorker';
-import { BroadcastEphemeris } from '../utils/rinexNavParser';
+import { BroadcastEphemeris, IonoParameters, Sp3OrbitData } from '../utils/rinexNavParser';
 import { getUncalibratedStations } from '../utils/antennaCatalogManager';
 
 interface Props {
   baselines: BaselineVector[];
   stations: Record<string, Station>;
   ephemerisMap?: Record<string, BroadcastEphemeris[]>;
+  sp3Orbit?: Sp3OrbitData | null;
+  loadedSp3File?: IgsSp3File | null;
+  ionoParams?: IonoParameters;
+  elevationMask?: number;
+  frequencies?: 'L1' | 'L1+L2' | 'Multi-GNSS';
   onUpdateBaseline: (baseline: BaselineVector) => void;
   onAddBaseline: (baseline: BaselineVector) => void;
   onDeleteBaseline: (id: string) => void;
@@ -61,6 +66,11 @@ export const BaselinesTab: React.FC<Props> = ({
   baselines,
   stations,
   ephemerisMap = {},
+  sp3Orbit = null,
+  loadedSp3File = null,
+  ionoParams,
+  elevationMask = 10,
+  frequencies = 'L1+L2',
   onUpdateBaseline,
   onAddBaseline,
   onDeleteBaseline,
@@ -79,10 +89,12 @@ export const BaselinesTab: React.FC<Props> = ({
     return getUncalibratedStations(stations);
   }, [stations]);
   const isSolveBlocked = uncalibratedStations.length > 0;
+  const hasOrbit = !!sp3Orbit || Object.keys(ephemerisMap).length > 0;
 
   const [selectedBaselineId, setSelectedBaselineId] = useState<string>(baselines[0]?.id || '');
   const [filterType, setFilterType] = useState<'ALL' | 'FIX' | 'FLOAT'>('ALL');
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [solverNotice, setSolverNotice] = useState<string | null>(null);
+  const [isSolvingSingle, setIsSolvingSingle] = useState(false);
 
   // Single Baseline Solver Modal State
   const [isSolverModalOpen, setIsSolverModalOpen] = useState(false);
@@ -106,7 +118,7 @@ export const BaselinesTab: React.FC<Props> = ({
   const activeCount = baselines.filter((b) => !b.excluded).length;
   const fixRatio = totalCount > 0 ? (fixCount / totalCount) * 100 : 0;
 
-  // Average spatial precision
+  // Average spatial precision, Ratio & PDOP
   const avgPrecisionMm = useMemo(() => {
     if (totalCount === 0) return 0;
     const sum = baselines.reduce((acc, b) => {
@@ -116,13 +128,15 @@ export const BaselinesTab: React.FC<Props> = ({
     return Math.round((sum / totalCount) * 10) / 10;
   }, [baselines, totalCount]);
 
-  const handleSimulateRtklib = () => {
-    setIsProcessing(true);
-    setTimeout(() => {
-      onRunRtklibSimulation();
-      setIsProcessing(false);
-    }, 800);
-  };
+  const { meanRatio, meanPdop } = useMemo(() => {
+    if (totalCount === 0) return { meanRatio: 0, meanPdop: 0 };
+    const rSum = baselines.reduce((acc, b) => acc + (b.ratio || 0), 0);
+    const pSum = baselines.reduce((acc, b) => acc + (b.pdop || 0), 0);
+    return {
+      meanRatio: rSum / totalCount,
+      meanPdop: pSum / totalCount,
+    };
+  }, [baselines, totalCount]);
 
   const handleToggleExclude = (bId: string) => {
     const b = baselines.find((x) => x.id === bId);
@@ -134,25 +148,52 @@ export const BaselinesTab: React.FC<Props> = ({
   };
 
   // Open single baseline solver
-  const handleOpenSolver = () => {
+  const handleOpenSolver = async () => {
+    if (!hasOrbit) {
+      setSolverNotice('Gerçek çift fark baz çözümü için önce IGS .SP3 veya RINEX Navigasyon (.nav/.n/.g) dosyası yükleyiniz.');
+      return;
+    }
+    setSolverNotice(null);
+    setIsSolverModalOpen(true);
     if (stationList.length >= 2) {
       const baseStn = stationList.find((s) => s.type === 'CORS') || stationList[0];
       const roverStn = stationList.find((s) => s.id !== baseStn.id) || stationList[1];
       setFromStationId(baseStn.id);
       setToStationId(roverStn.id);
 
-      const sol = solveDoubleDifferenceBaseline(baseStn, roverStn);
-      setSingleSolution(sol);
+      setIsSolvingSingle(true);
+      try {
+        const sol = await solveDoubleDifferenceBaselineAsync(baseStn, roverStn, {
+          ephemerisMap,
+          sp3Orbit,
+          iono: ionoParams,
+          elevationMaskDeg: elevationMask,
+          frequencies,
+        });
+        setSingleSolution(sol);
+      } finally {
+        setIsSolvingSingle(false);
+      }
     }
-    setIsSolverModalOpen(true);
   };
 
-  const handleCalculateSingle = (fromId: string, toId: string) => {
+  const handleCalculateSingle = async (fromId: string, toId: string) => {
     const st1 = stations[fromId];
     const st2 = stations[toId];
     if (st1 && st2 && fromId !== toId) {
-      const sol = solveDoubleDifferenceBaseline(st1, st2);
-      setSingleSolution(sol);
+      setIsSolvingSingle(true);
+      try {
+        const sol = await solveDoubleDifferenceBaselineAsync(st1, st2, {
+          ephemerisMap,
+          sp3Orbit,
+          iono: ionoParams,
+          elevationMaskDeg: elevationMask,
+          frequencies,
+        });
+        setSingleSolution(sol);
+      } finally {
+        setIsSolvingSingle(false);
+      }
     }
   };
 
@@ -180,6 +221,12 @@ export const BaselinesTab: React.FC<Props> = ({
       durationMin: singleSolution.durationMin,
       satellites: singleSolution.commonSatellites.length,
       pdop: singleSolution.pdop,
+      orbitSource: singleSolution.orbitSource,
+      frequencyMode: singleSolution.frequencyMode,
+      commonEpochs: singleSolution.commonEpochs,
+      cycleSlips: singleSolution.cycleSlips,
+      pivotSatellite: singleSolution.pivotSatellite,
+      diagnostics: singleSolution.diagnostics,
     };
 
     onAddBaseline(newBaseline);
@@ -211,13 +258,14 @@ export const BaselinesTab: React.FC<Props> = ({
             {onUploadNavFile && (
               <label
                 className="px-3 py-2 text-xs font-semibold bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-xl shadow-2xs transition flex items-center gap-1.5 cursor-pointer"
-                title="RINEX Navigasyon (.nav, .n, .g) efemeris dosyası yükle"
+                title="GPS (.n/.nav), GLONASS (.g) veya Karma (.p/.rnx) Navigasyon Efemerisi Yükle"
               >
                 <Orbit className="w-3.5 h-3.5 text-indigo-600" />
-                <span>RINEX Nav (.nav) Yükle</span>
+                <span>RINEX Nav (.nav/.n/.g)</span>
                 <input
                   type="file"
-                  accept=".nav,.n,.g,.rnx,.NAV,.N,.G,.RNX"
+                  multiple
+                  accept=".nav,.n,.g,.p,.rnx,.NAV,.N,.G,.P,.RNX,.23n,.24n,.25n,.26n,.23g,.24g,.25g,.26g,.23p,.24p,.25p,.26p"
                   onChange={onUploadNavFile}
                   className="hidden"
                 />
@@ -228,36 +276,55 @@ export const BaselinesTab: React.FC<Props> = ({
               <button
                 onClick={() => {
                   if (isSolveBlocked) {
-                    alert(`Baz çözümü engellendi: ${uncalibratedStations.map(s => s.name).join(', ')} istasyonunun ANTEX anten kalibrasyonu eksiktir. Lütfen önce ATX dosyasını yükleyin.`);
+                    setSolverNotice(
+                      `Baz çözümü engellendi: ${uncalibratedStations.map((s) => s.name).join(', ')} istasyonunun ANTEX anten kalibrasyonu eksiktir. Lütfen önce ATX dosyasını yükleyin.`
+                    );
                     return;
                   }
-                  handleOpenSolver();
+                  void handleOpenSolver();
                 }}
-                disabled={isSolveBlocked}
+                disabled={isSolveBlocked || isWorkerProcessing}
                 className={`px-3.5 py-2 text-xs font-bold border rounded-xl shadow-2xs transition flex items-center gap-1.5 ${
                   isSolveBlocked
                     ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60'
                     : 'bg-sky-50 hover:bg-sky-100 text-sky-700 border-sky-300 cursor-pointer'
                 }`}
-                title={isSolveBlocked ? 'Baz çözümü engellendi: Anten kalibrasyonu eksik' : 'İki istasyon seçerek canlı çift fark baz çözümü yapın'}
+                title={isSolveBlocked ? 'Baz çözümü engellendi: Anten kalibrasyonu eksik' : 'İki istasyon seçerek gerçek RINEX çift fark baz çözümü yapın'}
               >
                 <Plus className="w-3.5 h-3.5 text-sky-600" />
                 <span>Tekil Baz Çöz</span>
               </button>
             )}
 
-            {onGenerateBaselines && stationCount >= 2 && (
+            {stationCount >= 2 && (
               <button
-                onClick={onGenerateBaselines}
-                className="px-3.5 py-2 text-xs font-bold bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-xl shadow-2xs transition flex items-center gap-1.5 cursor-pointer"
-                title="Yüklenen istasyonlardan optimal ağ topolojisini (Radyal + Kontrol + Döngü bazları) türetir"
+                onClick={() => (onGenerateBaselines ? onGenerateBaselines() : onRunRtklibSimulation())}
+                disabled={isSolveBlocked || isWorkerProcessing}
+                className={`px-4 py-2 text-xs font-bold rounded-xl shadow-sm transition flex items-center gap-1.5 ${
+                  isSolveBlocked || isWorkerProcessing
+                    ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                    : 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer'
+                }`}
+                title="Yüklü istasyonlar arasındaki tüm ağ bazlarını gerçek RINEX ve LAMBDA motoru ile çözer"
               >
-                <Share2 className="w-3.5 h-3.5 text-slate-500" />
-                <span>Ağ Topolojisi</span>
+                <Play className="w-3.5 h-3.5" />
+                <span>{isWorkerProcessing ? 'Çözülüyor...' : 'Ağ Bazlarını Çöz'}</span>
               </button>
             )}
           </div>
         </div>
+
+        {solverNotice && (
+          <div className="mt-3 p-3 bg-amber-50 border border-amber-300 rounded-xl text-xs text-amber-950 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 font-medium">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>{solverNotice}</span>
+            </div>
+            <button onClick={() => setSolverNotice(null)} className="text-amber-800 font-bold px-2 cursor-pointer">
+              ×
+            </button>
+          </div>
+        )}
 
         {/* Fail-Safe Protection Banner for Baselines */}
         {isSolveBlocked && (
@@ -337,15 +404,27 @@ export const BaselinesTab: React.FC<Props> = ({
           </div>
         )}
 
-        {/* Ephemeris Orbit Status Badge */}
-        {Object.keys(ephemerisMap).length > 0 && !isWorkerProcessing && (
-          <div className="mt-3 p-2.5 bg-indigo-50/70 border border-indigo-200 rounded-xl text-xs flex items-center justify-between text-indigo-950 font-medium">
+        {/* Ephemeris / SP3 Orbit Status Badge */}
+        {!isWorkerProcessing && (
+          <div
+            className={`mt-3 p-2.5 rounded-xl text-xs flex items-center justify-between font-medium border ${
+              hasOrbit
+                ? 'bg-indigo-50/70 border-indigo-200 text-indigo-950'
+                : 'bg-amber-50 border-amber-300 text-amber-950'
+            }`}
+          >
             <div className="flex items-center gap-2">
-              <Orbit className="w-4 h-4 text-indigo-600" />
-              <span>Broadcast Navigasyon Efemerisi Yüklü: <strong>{Object.keys(ephemerisMap).length} Uydu</strong></span>
+              <Orbit className={`w-4 h-4 ${hasOrbit ? 'text-indigo-600' : 'text-amber-600'}`} />
+              <span>
+                {loadedSp3File
+                  ? `IGS .SP3 Hassas Yörünge Aktif: ${loadedSp3File.fileName} (${loadedSp3File.satelliteCount} Uydu, 10-pt Lagrange)`
+                  : Object.keys(ephemerisMap).length > 0
+                  ? `Broadcast Navigasyon Efemerisi Yüklü: ${Object.keys(ephemerisMap).length} Uydu (GPS/GLONASS/Galileo)`
+                  : 'Gerçek çift fark baz çözümü için henüz .SP3 veya .NAV efemeris dosyası yüklenmedi.'}
+              </span>
             </div>
-            <span className="text-[10px] font-mono text-indigo-700 bg-white px-2 py-0.5 rounded border border-indigo-200">
-              IS-GPS-200 Kepler Yörünge Modeli Aktif
+            <span className="text-[10px] font-mono bg-white px-2 py-0.5 rounded border border-slate-200 text-slate-700">
+              {loadedSp3File ? 'SP3 < 2 cm' : Object.keys(ephemerisMap).length > 0 ? 'Broadcast Kepler/RK4' : 'Yörünge Bekleniyor'}
             </span>
           </div>
         )}
@@ -354,13 +433,13 @@ export const BaselinesTab: React.FC<Props> = ({
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 pt-4 border-t border-slate-100 text-xs">
           <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 shadow-2xs">
             <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">TOPLAM BAZ</div>
-            <div className="text-lg font-black font-mono text-slate-900 mt-0.5">{totalCount} Vektör</div>
+            <div className="text-lg font-black font-mono tabular-nums text-slate-900 mt-0.5">{totalCount} Vektör</div>
             <div className="text-[10px] text-slate-500">{activeCount} Aktif Dengelemede</div>
           </div>
 
           <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 shadow-2xs">
             <div className="text-[10px] text-emerald-600 font-bold uppercase tracking-wider">FIX ORANI (Q=1)</div>
-            <div className="text-lg font-black font-mono text-emerald-800 mt-0.5">
+            <div className="text-lg font-black font-mono tabular-nums text-emerald-800 mt-0.5">
               %{fixRatio.toFixed(1)} ({fixCount}/{totalCount})
             </div>
             <div className="text-[10px] text-emerald-700">LAMBDA Ratio &ge; 3.0</div>
@@ -368,16 +447,20 @@ export const BaselinesTab: React.FC<Props> = ({
 
           <div className="p-3 bg-sky-50 rounded-xl border border-sky-200 shadow-2xs">
             <div className="text-[10px] text-sky-600 font-bold uppercase tracking-wider">ORT. HASSASİYET (3D)</div>
-            <div className="text-lg font-black font-mono text-sky-800 mt-0.5">
-              {avgPrecisionMm > 0 ? `±${avgPrecisionMm} mm` : '-'}
+            <div className="text-lg font-black font-mono tabular-nums text-sky-800 mt-0.5">
+              {avgPrecisionMm > 0 ? `±${avgPrecisionMm} mm` : '—'}
             </div>
             <div className="text-[10px] text-sky-700">Milimetrik Taşıyıcı Faz</div>
           </div>
 
           <div className="p-3 bg-indigo-50 rounded-xl border border-indigo-200 shadow-2xs">
             <div className="text-[10px] text-indigo-600 font-bold uppercase tracking-wider">ORT. RATIO / PDOP</div>
-            <div className="text-lg font-black font-mono text-indigo-900 mt-0.5">28.4 / 1.2</div>
-            <div className="text-[10px] text-indigo-700">Sağlam Geometri</div>
+            <div className="text-lg font-black font-mono tabular-nums text-indigo-900 mt-0.5">
+              {totalCount > 0 ? `${meanRatio.toFixed(1)} / ${meanPdop.toFixed(1)}` : '—'}
+            </div>
+            <div className="text-[10px] text-indigo-700">
+              {totalCount > 0 ? (meanPdop <= 3.0 ? 'Sağlam Geometri' : 'Zayıf Geometri') : 'Hesaplama Bekleniyor'}
+            </div>
           </div>
         </div>
       </div>
@@ -585,12 +668,30 @@ export const BaselinesTab: React.FC<Props> = ({
 
                 <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-100">
                   <span className="text-[10px] text-slate-400 font-bold block">ORT. RMS KALINTISI</span>
-                  <span className="font-mono font-extrabold text-slate-900">
+                  <span className="font-mono tabular-nums font-extrabold text-slate-900">
                     {(selectedBaseline.rms * 1000).toFixed(1)} mm
                   </span>
-                  <span className="text-[10px] text-slate-500 block">PDOP: {selectedBaseline.pdop.toFixed(1)}</span>
+                  <span className="text-[10px] text-slate-500 block">
+                    PDOP: {selectedBaseline.pdop.toFixed(1)} • {selectedBaseline.orbitSource || 'NAV'}
+                  </span>
                 </div>
               </div>
+
+              {(selectedBaseline.commonEpochs !== undefined || selectedBaseline.diagnostics) && (
+                <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-[11px] space-y-1">
+                  <div className="flex justify-between font-mono">
+                    <span className="text-slate-500">Ortak Epok / Kayıp:</span>
+                    <span className="font-bold text-slate-800">
+                      {selectedBaseline.commonEpochs ?? '-'} epok / {selectedBaseline.cycleSlips ?? 0} slip
+                    </span>
+                  </div>
+                  {selectedBaseline.diagnostics && (
+                    <div className="text-[10px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                      {selectedBaseline.diagnostics}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* 3x3 Positive-Definite Covariance Matrix Display */}
               <div>
@@ -598,7 +699,9 @@ export const BaselinesTab: React.FC<Props> = ({
                   <h4 className="text-xs font-bold text-slate-800">
                     Varyans-Kovaryans Matrisi Q_b (m²)
                   </h4>
-                  <span className="text-[10px] text-slate-400 font-mono">RTKLIB Format</span>
+                  <span className="text-[10px] text-slate-400 font-mono">
+                    {selectedBaseline.frequencyMode || 'DD EKF'}
+                  </span>
                 </div>
 
                 <div className="bg-slate-950 text-slate-200 p-3.5 rounded-xl font-mono text-[11px] space-y-1.5 shadow-inner border border-slate-800">
@@ -621,7 +724,7 @@ export const BaselinesTab: React.FC<Props> = ({
               </div>
 
               {/* Standard Deviations in Millimeters */}
-              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs flex justify-between font-mono">
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs flex justify-between font-mono tabular-nums">
                 <span>σX: <strong>±{selSigmaX.toFixed(1)} mm</strong></span>
                 <span>σY: <strong>±{selSigmaY.toFixed(1)} mm</strong></span>
                 <span>σZ: <strong>±{selSigmaZ.toFixed(1)} mm</strong></span>
@@ -693,7 +796,7 @@ export const BaselinesTab: React.FC<Props> = ({
                     value={fromStationId}
                     onChange={(e) => {
                       setFromStationId(e.target.value);
-                      handleCalculateSingle(e.target.value, toStationId);
+                      void handleCalculateSingle(e.target.value, toStationId);
                     }}
                     className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:ring-2 focus:ring-sky-500"
                   >
@@ -713,7 +816,7 @@ export const BaselinesTab: React.FC<Props> = ({
                     value={toStationId}
                     onChange={(e) => {
                       setToStationId(e.target.value);
-                      handleCalculateSingle(fromStationId, e.target.value);
+                      void handleCalculateSingle(fromStationId, e.target.value);
                     }}
                     className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:ring-2 focus:ring-sky-500"
                   >
@@ -726,8 +829,15 @@ export const BaselinesTab: React.FC<Props> = ({
                 </div>
               </div>
 
+              {isSolvingSingle && (
+                <div className="p-4 bg-sky-50 border border-sky-200 rounded-xl text-xs font-bold text-sky-900 flex items-center gap-2">
+                  <RefreshCw className="w-4 h-4 animate-spin text-sky-600" />
+                  <span>Gerçek RINEX EKF ve LAMBDA tamsayı çözümü hesaplanıyor...</span>
+                </div>
+              )}
+
               {/* Live Solution Results */}
-              {singleSolution && (
+              {singleSolution && !isSolvingSingle && (
                 <div className="space-y-4 pt-2">
                   <div className="p-4 rounded-2xl bg-sky-50/70 border border-sky-200 flex items-center justify-between">
                     <div>
@@ -735,13 +845,22 @@ export const BaselinesTab: React.FC<Props> = ({
                         <span className="text-sm font-extrabold text-sky-950">
                           {singleSolution.fromId} → {singleSolution.toId}
                         </span>
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
-                          {singleSolution.status} (Ratio: {singleSolution.ratio})
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                            singleSolution.status === 'FIX'
+                              ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                              : 'bg-amber-100 text-amber-800 border-amber-300'
+                          }`}
+                        >
+                          {singleSolution.status} (Ratio: {singleSolution.ratio.toFixed(1)})
                         </span>
                       </div>
                       <div className="text-xs text-sky-800 mt-1 font-mono">
-                        3D Uzunluk: <strong>{singleSolution.length.toFixed(3)} m</strong> • Pivot Uydu: <strong>{singleSolution.pivotSatellite}</strong>
+                        3D Uzunluk: <strong>{singleSolution.length.toFixed(3)} m</strong> • Pivot Uydu: <strong>{singleSolution.pivotSatellite || '-'}</strong> • Epok: <strong>{singleSolution.commonEpochs ?? '-'}</strong>
                       </div>
+                      {singleSolution.diagnostics && (
+                        <div className="text-[11px] text-amber-800 mt-1">{singleSolution.diagnostics}</div>
+                      )}
                     </div>
 
                     <div className="text-right">

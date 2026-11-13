@@ -42,6 +42,8 @@ export interface AntennaData {
   radius: number; // meters (for slant calculation)
   verticalOffset: number; // meters
   correctedHeight: number; // ARP vertical height (m)
+  deltaE?: number; // East eccentricity from marker to ARP (m)
+  deltaN?: number; // North eccentricity from marker to ARP (m)
   pcoL1: { n: number; e: number; u: number }; // Phase Center Offset (mm)
   pcoL2: { n: number; e: number; u: number }; // Phase Center Offset (mm)
   pcvZenith: number[]; // PCV variations (mm)
@@ -73,6 +75,11 @@ export interface Station {
   // Antenna & setup
   antenna: AntennaData;
   observationDateStr?: string; // e.g. "2025-06-15 10:30:00 GPS"
+  opfsFileName?: string; // Raw RINEX file name key in OPFS storage
+  hasRealObsData?: boolean; // True when actual numeric observation epochs exist
+  sppApplied?: boolean; // True when SPP pseudorange refinement has updated initial coords
+  sppRms?: number; // SPP pseudorange post-fit RMS (m)
+  sppEpochsUsed?: number;
   // Detailed RINEX Occupation & Satellite tracking data for Topcon Tools Occupation View
   occupation?: RinexOccupation;
   // Adjusted values (after 3D adjustment)
@@ -123,6 +130,14 @@ export interface BaselineVector {
   durationMin: number;
   satellites: number;
   pdop: number;
+  // Real solver telemetry
+  orbitSource?: 'SP3' | 'NAV';
+  frequencyMode?: string;
+  commonEpochs?: number;
+  cycleSlips?: number;
+  pivotSatellite?: string;
+  constellationsUsed?: GnssConstellation[];
+  diagnostics?: string;
   // Adjustment results
   vX?: number; // residual in mm
   vY?: number; // residual in mm
@@ -206,6 +221,9 @@ export interface SatelliteTrack {
   }>;
   avgElevation?: number; // degrees (approximate or computed)
   avgSnr?: number; // dB-Hz (signal to noise)
+  multipathMp1?: number; // Code multipath MP1 RMS (m)
+  multipathMp2?: number; // Code multipath MP2 RMS (m)
+  cycleSlips?: number; // Detected cycle slips across track
   freqs: string[]; // e.g. ["L1", "L2", "L5"] or ["C1C", "L1C", "D1C", "S1C"]
 }
 
@@ -228,7 +246,7 @@ export interface RinexOccupation {
   antennaType?: string;
   firstEpochDate: string; // e.g. "2025-06-15 08:00:00"
   lastEpochDate: string; // e.g. "2025-06-15 12:00:00"
-  firstEpochSec: number; // Unix timestamp or Julian seconds
+  firstEpochSec: number; // Continuous GPS seconds
   lastEpochSec: number;
   durationSeconds: number; // session duration
   intervalSeconds: number; // e.g. 1.0 or 30.0s
@@ -237,6 +255,8 @@ export interface RinexOccupation {
   satellites: SatelliteTrack[];
   epochRecords: EpochRecord[];
   observationTypes: string[]; // e.g. ["L1", "L2", "C1", "P2", "S1", "S2"]
+  glonassSlotFreq?: Record<number, number>; // slot number -> frequency channel k (-7..6)
+  hasRealObsData?: boolean;
   approxPosition?: { x: number; y: number; z: number };
 }
 
@@ -271,6 +291,9 @@ export interface IgsSp3File {
   satelliteCount: number;
   satellites: string[];
   productType: 'FINAL' | 'RAPID' | 'ULTRA_RAPID';
+  firstEpochIso?: string;
+  lastEpochIso?: string;
+  intervalSec?: number;
 }
 
 export interface RinexHeaderMetadata {
@@ -300,6 +323,7 @@ export interface RinexHeaderMetadata {
   intervalSec?: number;
   leapSeconds?: number;
   obsTypesBySystem: Record<string, string[]>;
+  glonassSlotFreq?: Record<number, number>;
   warnings: string[];
 }
 
