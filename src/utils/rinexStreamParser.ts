@@ -1124,6 +1124,7 @@ export function createStationFromSummary(
   options: {
     dom?: number;
     forcedType?: StationType;
+    existingStation?: Station;
   } = {}
 ): Station {
   const { metadata, geodeticApprox, occupation } = summary;
@@ -1137,9 +1138,16 @@ export function createStationFromSummary(
   const pcoL1 = matched ? matched.pcoL1 : { n: 0, e: 0, u: 0 };
   const pcoL2 = matched ? matched.pcoL2 : { n: 0, e: 0, u: 0 };
   const pcvZenith = matched ? matched.pcvZenith : [0, 0, 0, 0, 0, 0, 0];
-  const verticalOffset = matched ? (matched.verticalOffset || 0.0) : 0.0;
-  const radius = matched ? (matched.radius || 0.08) : 0.08;
-  const correctedHeight = calculateCorrectedAntennaHeight('vertical', metadata.deltaH, radius, 0.0);
+
+  const existingAnt = options.existingStation?.antenna;
+  const isUserEdited = existingAnt?.isUserEdited || (existingAnt?.measuredHeight !== undefined && existingAnt.measuredHeight > 0 && metadata.deltaH === 0);
+
+  const heightType = isUserEdited && existingAnt ? existingAnt.heightType : 'vertical';
+  const measuredHeight = isUserEdited && existingAnt ? existingAnt.measuredHeight : metadata.deltaH;
+  const radius = isUserEdited && existingAnt?.radius !== undefined ? existingAnt.radius : (matched ? (matched.radius || 0.08) : 0.08);
+  const verticalOffset = isUserEdited && existingAnt?.verticalOffset !== undefined ? existingAnt.verticalOffset : (matched ? (matched.verticalOffset || 0.0) : 0.0);
+  const correctedHeight = calculateCorrectedAntennaHeight(heightType, measuredHeight, radius, verticalOffset);
+  const heightSource: 'USER' | 'RINEX' = isUserEdited ? 'USER' : (metadata.deltaH > 0 ? 'RINEX' : 'USER');
 
   return {
     id: metadata.markerName,
@@ -1156,11 +1164,13 @@ export function createStationFromSummary(
     projX: geodeticApprox.projX,
     antenna: {
       model,
-      heightType: 'vertical',
-      measuredHeight: metadata.deltaH,
+      heightType,
+      measuredHeight,
       radius,
       verticalOffset,
       correctedHeight,
+      heightSource,
+      isUserEdited,
       deltaE: metadata.deltaE,
       deltaN: metadata.deltaN,
       pcoL1,

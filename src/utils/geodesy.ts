@@ -21,6 +21,7 @@ import {
   EpochRecord,
   IgsOrbitInfo,
   IgsSp3File,
+  ExcludedBaselineRecord,
 } from '../types/gnss';
 import { matchAntennaInNoaaCatalog, NOAA_ANTCAL_CATALOG, NoaaAntennaCalibration } from '../data/noaaAntcal';
 
@@ -1801,6 +1802,39 @@ function invert3x3(m: [
  * - Rigorous Baarda Data Snooping (w-test) with exact Q_vv = Q_k - A_k N+ A_k^T
  * - Error ellipsoids (a, b, c, theta, sigma_h at 95% confidence) for all stations
  */
+/**
+ * Checks whether the baseline network forms a fully connected graph across all stations via BFS
+ */
+export function checkNetworkConnectivity(stationKeys: string[], baselines: BaselineVector[]): boolean {
+  if (stationKeys.length <= 1) return true;
+  const active = baselines.filter((b) => !b.excluded);
+  if (active.length === 0) return false;
+
+  const visited = new Set<string>([stationKeys[0]]);
+  const queue = [stationKeys[0]];
+  while (queue.length > 0) {
+    const curr = queue.shift()!;
+    for (const b of active) {
+      if (b.fromId === curr && !visited.has(b.toId)) {
+        visited.add(b.toId);
+        queue.push(b.toId);
+      } else if (b.toId === curr && !visited.has(b.fromId)) {
+        visited.add(b.fromId);
+        queue.push(b.fromId);
+      }
+    }
+  }
+  return visited.size === stationKeys.length;
+}
+
+/**
+ * 3D Gauss-Markov Inner-Constraint Free Network Adjustment (İz Minimizasyonlu Serbest Ağ Dengelemesi)
+ * - Trace minimization of covariance matrix Sigma_xx (min tr(Sigma_xx))
+ * - Exact Gauss-Jordan inversion on full-rank (3n+3) bordered system (no Tikhonov bias)
+ * - Iterative Baarda Data Snooping (w-test) outlier screening & automatic gross-error exclusion
+ * - Exact Q_vv = Q_k - A_k N+ A_k^T and component-wise standardized residuals
+ * - Error ellipsoids (a, b, c, theta, sigma_h at 95% confidence) for all stations
+ */
 export function perform3DNetworkAdjustment(
   inputStations: Record<string, Station>,
   inputBaselines: BaselineVector[],
@@ -1812,79 +1846,51 @@ export function perform3DNetworkAdjustment(
     const nStn = stationKeys.length;
     if (nStn < 2) return null;
 
-    // Require genuine solved baselines (zero synthetic baseline generation fallback)
-    const activeBaselines = inputBaselines.filter(
-      (b) => !b.excluded && b.fromId in inputStations && b.toId in inputStations
-    );
-    if (activeBaselines.length < 1) return null;
+    const workingBaselines: BaselineVector[] = inputBaselines.map((b) => ({ ...b }));
+    const excludedRecords: ExcludedBaselineRecord[] = [];
+    const autoExclude = config.autoExcludeOutliers ?? true;
+    const maxOutlierPasses = autoExclude ? (config.maxOutlierIterations ?? 5) : 0;
+    const wCrit = config.wCrit || 3.29;
 
-    // Verify graph connectivity across all stations via BFS
-    const visitedConn = new Set<string>([stationKeys[0]]);
-    const connQueue = [stationKeys[0]];
-    while (connQueue.length > 0) {
-      const curr = connQueue.shift()!;
-      for (const b of activeBaselines) {
-        if (b.fromId === curr && !visitedConn.has(b.toId)) {
-          visitedConn.add(b.toId);
-          connQueue.push(b.toId);
-        } else if (b.toId === curr && !visitedConn.has(b.fromId)) {
-          visitedConn.add(b.fromId);
-          connQueue.push(b.fromId);
-        }
-      }
-    }
-    if (visitedConn.size !== nStn) {
-      console.warn(`Disconnected baseline network: ${visitedConn.size}/${nStn} stations connected.`);
-      return null;
-    }
-
-    // Inner-Constraint Free Network: ALL stations are unknowns; rank defect = 3 (translation only in 3D ECEF deltas)
     const fixedStationIds: string[] = [];
     const unknownStationIds: string[] = [...stationKeys];
     const numUnknowns = 3 * nStn;
-    const numObs = 3 * activeBaselines.length;
-
-    // DOF = 3*m - (3*n - 3) = 3*m - 3*n + 3
-    const dof = numObs - (numUnknowns - 3);
-    const effectiveDof = Math.max(1, dof);
 
     const unknownIndexMap: Record<string, number> = {};
     for (let i = 0; i < nStn; i++) {
       unknownIndexMap[unknownStationIds[i]] = i;
     }
 
-    // Initialize coordinates
-    const currentCoords: Record<string, { x: number; y: number; z: number }> = {};
+    // Seed initial coordinates once
+    const initialCoords: Record<string, { x: number; y: number; z: number }> = {};
     let seedStn: string | null = null;
     for (const id of stationKeys) {
       const st = inputStations[id];
       const x = Number(st.x) || 0;
       const y = Number(st.y) || 0;
       const z = Number(st.z) || 0;
-      currentCoords[id] = { x, y, z };
+      initialCoords[id] = { x, y, z };
       if (!seedStn && (x !== 0 || y !== 0 || z !== 0)) {
         seedStn = id;
       }
     }
-    if (!seedStn) {
-      // At least one station must have geocentric approx/SPP coordinates so GRS80/TM exists
-      return null;
-    }
+    if (!seedStn) return null;
 
-    // Propagate coordinates along baseline spanning tree for any station with (0,0,0)
+    // Propagate zero coordinates along baseline spanning tree if any station starts at (0,0,0)
     const hasZeroCoords = stationKeys.some(
-      (id) => currentCoords[id].x === 0 && currentCoords[id].y === 0 && currentCoords[id].z === 0
+      (id) => initialCoords[id].x === 0 && initialCoords[id].y === 0 && initialCoords[id].z === 0
     );
     if (hasZeroCoords) {
       const queue = [seedStn];
       const visited = new Set<string>([seedStn]);
       while (queue.length > 0) {
         const curr = queue.shift()!;
-        const currC = currentCoords[curr];
-        for (const b of activeBaselines) {
+        const currC = initialCoords[curr];
+        for (const b of workingBaselines) {
+          if (b.excluded) continue;
           if (b.fromId === curr && !visited.has(b.toId)) {
-            if (currentCoords[b.toId].x === 0 && currentCoords[b.toId].y === 0 && currentCoords[b.toId].z === 0) {
-              currentCoords[b.toId] = {
+            if (initialCoords[b.toId].x === 0 && initialCoords[b.toId].y === 0 && initialCoords[b.toId].z === 0) {
+              initialCoords[b.toId] = {
                 x: currC.x + b.dX,
                 y: currC.y + b.dY,
                 z: currC.z + b.dZ,
@@ -1893,8 +1899,8 @@ export function perform3DNetworkAdjustment(
             visited.add(b.toId);
             queue.push(b.toId);
           } else if (b.toId === curr && !visited.has(b.fromId)) {
-            if (currentCoords[b.fromId].x === 0 && currentCoords[b.fromId].y === 0 && currentCoords[b.fromId].z === 0) {
-              currentCoords[b.fromId] = {
+            if (initialCoords[b.fromId].x === 0 && initialCoords[b.fromId].y === 0 && initialCoords[b.fromId].z === 0) {
+              initialCoords[b.fromId] = {
                 x: currC.x - b.dX,
                 y: currC.y - b.dY,
                 z: currC.z - b.dZ,
@@ -1907,49 +1913,227 @@ export function perform3DNetworkAdjustment(
       }
     }
 
+    let currentCoords: Record<string, { x: number; y: number; z: number }> = {};
     let iterations = 0;
+    let outlierIterations = 0;
     let maxDisplacementMm = 0;
     let normalInv: number[][] | null = null;
     let lastNormalN: number[][] | null = null;
     let finalResiduals: number[] = [];
-    let finalBaselines: BaselineVector[] = [];
     let vPv = 0;
-
-    const A: number[][] = Array.from({ length: numObs }, () => Array(numUnknowns).fill(0));
-    const l: number[] = Array(numObs).fill(0);
-    const P_blocks: Array<[[number, number, number], [number, number, number], [number, number, number]]> = [];
-
-    for (let k = 0; k < activeBaselines.length; k++) {
-      const b = activeBaselines[k];
-      const qxx = b.qxx && !isNaN(b.qxx) ? b.qxx : 1e-5;
-      const qyy = b.qyy && !isNaN(b.qyy) ? b.qyy : 1e-5;
-      const qzz = b.qzz && !isNaN(b.qzz) ? b.qzz : 1e-5;
-      const qxy = b.qxy && !isNaN(b.qxy) ? b.qxy : 0;
-      const qyz = b.qyz && !isNaN(b.qyz) ? b.qyz : 0;
-      const qzx = b.qzx && !isNaN(b.qzx) ? b.qzx : 0;
-
-      P_blocks.push(
-        invert3x3([
-          [qxx, qxy, qzx],
-          [qxy, qyy, qyz],
-          [qzx, qyz, qzz],
-        ])
-      );
-    }
-
-    const gWeight = 1.0 / Math.sqrt(nStn);
-    const dimBordered = numUnknowns + 3;
-
-    // Iterative Gauss-Markov Inner-Constraint Solver
-    for (let iter = 0; iter < 4; iter++) {
-      iterations++;
-
-      for (let r = 0; r < numObs; r++) {
-        l[r] = 0;
-        for (let c = 0; c < numUnknowns; c++) {
-          A[r][c] = 0;
-        }
+    let sigma0Aposteriori = 1.0;
+    let sigma0Sq = 1.0;
+    let dof = 0;
+    let effectiveDof = 1;
+    let numObs = 0;
+    let chiPassed = false;
+    let chiLower = 0;
+    let chiUpper = 1e9;
+    let totalRedundancySum = 0;
+    let nonZeroACount = 0;
+    let outliers: string[] = [];
+    let activeBaselines: BaselineVector[] = [];
+    const baselineEvalMap = new Map<
+      string,
+      {
+        vX_mm: number;
+        vY_mm: number;
+        vZ_mm: number;
+        spatialV_mm: number;
+        maxW: number;
+        r_k: number;
+        isOutlier: boolean;
       }
+    >();
+
+    // Outlier screening loop (Baarda Data Snooping & iterative re-weighting)
+    for (let outlierPass = 0; outlierPass <= maxOutlierPasses; outlierPass++) {
+      activeBaselines = workingBaselines.filter(
+        (b) => !b.excluded && b.fromId in inputStations && b.toId in inputStations
+      );
+      if (activeBaselines.length < 1) return null;
+
+      if (!checkNetworkConnectivity(stationKeys, activeBaselines)) {
+        if (outlierPass === 0) {
+          console.warn(`Disconnected baseline network.`);
+          return null;
+        }
+        break;
+      }
+
+      numObs = 3 * activeBaselines.length;
+      dof = numObs - (numUnknowns - 3);
+      effectiveDof = Math.max(1, dof);
+      if (dof < 1 && outlierPass > 0) {
+        break;
+      }
+
+      // Reset coordinates to initialCoords for clean convergence
+      currentCoords = {};
+      for (const id of stationKeys) {
+        currentCoords[id] = { ...initialCoords[id] };
+      }
+
+      const A: number[][] = Array.from({ length: numObs }, () => Array(numUnknowns).fill(0));
+      const l: number[] = Array(numObs).fill(0);
+      const P_blocks: Array<[[number, number, number], [number, number, number], [number, number, number]]> = [];
+
+      for (let k = 0; k < activeBaselines.length; k++) {
+        const b = activeBaselines[k];
+        const qxx = b.qxx && !isNaN(b.qxx) ? b.qxx : 1e-5;
+        const qyy = b.qyy && !isNaN(b.qyy) ? b.qyy : 1e-5;
+        const qzz = b.qzz && !isNaN(b.qzz) ? b.qzz : 1e-5;
+        const qxy = b.qxy && !isNaN(b.qxy) ? b.qxy : 0;
+        const qyz = b.qyz && !isNaN(b.qyz) ? b.qyz : 0;
+        const qzx = b.qzx && !isNaN(b.qzx) ? b.qzx : 0;
+
+        P_blocks.push(
+          invert3x3([
+            [qxx, qxy, qzx],
+            [qxy, qyy, qyz],
+            [qzx, qyz, qzz],
+          ])
+        );
+      }
+
+      const gWeight = 1.0 / Math.sqrt(nStn);
+      const dimBordered = numUnknowns + 3;
+
+      // Iterative Gauss-Markov Inner-Constraint Solver
+      for (let iter = 0; iter < 4; iter++) {
+        iterations++;
+
+        for (let r = 0; r < numObs; r++) {
+          l[r] = 0;
+          for (let c = 0; c < numUnknowns; c++) {
+            A[r][c] = 0;
+          }
+        }
+
+        for (let k = 0; k < activeBaselines.length; k++) {
+          const b = activeBaselines[k];
+          const rowStart = 3 * k;
+
+          const fromCoord = currentCoords[b.fromId];
+          const toCoord = currentCoords[b.toId];
+          if (!fromCoord || !toCoord) continue;
+
+          l[rowStart] = b.dX - (toCoord.x - fromCoord.x);
+          l[rowStart + 1] = b.dY - (toCoord.y - fromCoord.y);
+          l[rowStart + 2] = b.dZ - (toCoord.z - fromCoord.z);
+
+          const uFrom = unknownIndexMap[b.fromId];
+          const colFrom = 3 * uFrom;
+          A[rowStart][colFrom] = -1.0;
+          A[rowStart + 1][colFrom + 1] = -1.0;
+          A[rowStart + 2][colFrom + 2] = -1.0;
+
+          const uTo = unknownIndexMap[b.toId];
+          const colTo = 3 * uTo;
+          A[rowStart][colTo] = 1.0;
+          A[rowStart + 1][colTo + 1] = 1.0;
+          A[rowStart + 2][colTo + 2] = 1.0;
+        }
+
+        // N = A^T P A, u = A^T P l
+        const N: number[][] = Array.from({ length: numUnknowns }, () => Array(numUnknowns).fill(0));
+        const uVec: number[] = Array(numUnknowns).fill(0);
+
+        for (let k = 0; k < activeBaselines.length; k++) {
+          const rowStart = 3 * k;
+          const P_k = P_blocks[k];
+          const l_k = [l[rowStart], l[rowStart + 1], l[rowStart + 2]];
+
+          const Pl_k = [
+            P_k[0][0] * l_k[0] + P_k[0][1] * l_k[1] + P_k[0][2] * l_k[2],
+            P_k[1][0] * l_k[0] + P_k[1][1] * l_k[1] + P_k[1][2] * l_k[2],
+            P_k[2][0] * l_k[0] + P_k[2][1] * l_k[1] + P_k[2][2] * l_k[2],
+          ];
+
+          for (let c = 0; c < numUnknowns; c++) {
+            const A_kc0 = A[rowStart][c];
+            const A_kc1 = A[rowStart + 1][c];
+            const A_kc2 = A[rowStart + 2][c];
+            if (A_kc0 === 0 && A_kc1 === 0 && A_kc2 === 0) continue;
+
+            uVec[c] += A_kc0 * Pl_k[0] + A_kc1 * Pl_k[1] + A_kc2 * Pl_k[2];
+
+            const PA0 = P_k[0][0] * A_kc0 + P_k[0][1] * A_kc1 + P_k[0][2] * A_kc2;
+            const PA1 = P_k[1][0] * A_kc0 + P_k[1][1] * A_kc1 + P_k[1][2] * A_kc2;
+            const PA2 = P_k[2][0] * A_kc0 + P_k[2][1] * A_kc1 + P_k[2][2] * A_kc2;
+
+            for (let c2 = 0; c2 < numUnknowns; c2++) {
+              const A_k20 = A[rowStart][c2];
+              const A_k21 = A[rowStart + 1][c2];
+              const A_k22 = A[rowStart + 2][c2];
+              if (A_k20 === 0 && A_k21 === 0 && A_k22 === 0) continue;
+
+              N[c2][c] += A_k20 * PA0 + A_k21 * PA1 + A_k22 * PA2;
+            }
+          }
+        }
+        lastNormalN = N;
+
+        // Bordered Inner-Constraint System
+        let diagSum = 0;
+        for (let i = 0; i < numUnknowns; i++) diagSum += Math.abs(N[i][i]);
+        const gScale = Math.sqrt(Math.max(1.0, diagSum / Math.max(1, numUnknowns)));
+        const gEntry = gWeight * gScale;
+
+        const bordered: number[][] = Array.from({ length: dimBordered }, () =>
+          Array(dimBordered).fill(0)
+        );
+        for (let r = 0; r < numUnknowns; r++) {
+          for (let c = 0; c < numUnknowns; c++) {
+            bordered[r][c] = N[r][c];
+          }
+        }
+        for (let stIdx = 0; stIdx < nStn; stIdx++) {
+          const colBase = 3 * stIdx;
+          for (let axis = 0; axis < 3; axis++) {
+            bordered[colBase + axis][numUnknowns + axis] = gEntry;
+            bordered[numUnknowns + axis][colBase + axis] = gEntry;
+          }
+        }
+
+        const borderedInv = invertMatrixGaussJordan(bordered);
+        if (!borderedInv) return null;
+
+        // Upper-left (numUnknowns x numUnknowns) block is exact Moore-Penrose pseudoinverse N+
+        normalInv = Array.from({ length: numUnknowns }, (_, r) =>
+          borderedInv[r].slice(0, numUnknowns)
+        );
+
+        const dx_hat: number[] = Array(numUnknowns).fill(0);
+        for (let r = 0; r < numUnknowns; r++) {
+          for (let c = 0; c < numUnknowns; c++) {
+            dx_hat[r] += normalInv[r][c] * uVec[c];
+          }
+        }
+
+        let stepMaxMm = 0;
+        for (let i = 0; i < nStn; i++) {
+          const stId = unknownStationIds[i];
+          const colStart = 3 * i;
+          const dX = dx_hat[colStart];
+          const dY = dx_hat[colStart + 1];
+          const dZ = dx_hat[colStart + 2];
+
+          currentCoords[stId].x += dX;
+          currentCoords[stId].y += dY;
+          currentCoords[stId].z += dZ;
+
+          const dispMm = Math.sqrt(dX * dX + dY * dY + dZ * dZ) * 1000.0;
+          if (dispMm > stepMaxMm) stepMaxMm = dispMm;
+        }
+
+        maxDisplacementMm = stepMaxMm;
+        if (stepMaxMm < 0.05) break;
+      }
+
+      // Calculate final residuals v = (X_to - X_from) - b_obs
+      finalResiduals = Array(numObs).fill(0);
+      vPv = 0;
 
       for (let k = 0; k < activeBaselines.length; k++) {
         const b = activeBaselines[k];
@@ -1959,248 +2143,162 @@ export function perform3DNetworkAdjustment(
         const toCoord = currentCoords[b.toId];
         if (!fromCoord || !toCoord) continue;
 
-        l[rowStart] = b.dX - (toCoord.x - fromCoord.x);
-        l[rowStart + 1] = b.dY - (toCoord.y - fromCoord.y);
-        l[rowStart + 2] = b.dZ - (toCoord.z - fromCoord.z);
+        const vX = toCoord.x - fromCoord.x - b.dX;
+        const vY = toCoord.y - fromCoord.y - b.dY;
+        const vZ = toCoord.z - fromCoord.z - b.dZ;
 
-        const uFrom = unknownIndexMap[b.fromId];
-        const colFrom = 3 * uFrom;
-        A[rowStart][colFrom] = -1.0;
-        A[rowStart + 1][colFrom + 1] = -1.0;
-        A[rowStart + 2][colFrom + 2] = -1.0;
+        finalResiduals[rowStart] = vX;
+        finalResiduals[rowStart + 1] = vY;
+        finalResiduals[rowStart + 2] = vZ;
 
-        const uTo = unknownIndexMap[b.toId];
-        const colTo = 3 * uTo;
-        A[rowStart][colTo] = 1.0;
-        A[rowStart + 1][colTo + 1] = 1.0;
-        A[rowStart + 2][colTo + 2] = 1.0;
-      }
-
-      // N = A^T P A, u = A^T P l
-      const N: number[][] = Array.from({ length: numUnknowns }, () => Array(numUnknowns).fill(0));
-      const uVec: number[] = Array(numUnknowns).fill(0);
-
-      for (let k = 0; k < activeBaselines.length; k++) {
-        const rowStart = 3 * k;
         const P_k = P_blocks[k];
-        const l_k = [l[rowStart], l[rowStart + 1], l[rowStart + 2]];
-
-        const Pl_k = [
-          P_k[0][0] * l_k[0] + P_k[0][1] * l_k[1] + P_k[0][2] * l_k[2],
-          P_k[1][0] * l_k[0] + P_k[1][1] * l_k[1] + P_k[1][2] * l_k[2],
-          P_k[2][0] * l_k[0] + P_k[2][1] * l_k[1] + P_k[2][2] * l_k[2],
+        const v_k = [vX, vY, vZ];
+        const Pv_k = [
+          P_k[0][0] * v_k[0] + P_k[0][1] * v_k[1] + P_k[0][2] * v_k[2],
+          P_k[1][0] * v_k[0] + P_k[1][1] * v_k[1] + P_k[1][2] * v_k[2],
+          P_k[2][0] * v_k[0] + P_k[2][1] * v_k[1] + P_k[2][2] * v_k[2],
         ];
 
-        for (let c = 0; c < numUnknowns; c++) {
-          const A_kc0 = A[rowStart][c];
-          const A_kc1 = A[rowStart + 1][c];
-          const A_kc2 = A[rowStart + 2][c];
-          if (A_kc0 === 0 && A_kc1 === 0 && A_kc2 === 0) continue;
+        vPv += v_k[0] * Pv_k[0] + v_k[1] * Pv_k[1] + v_k[2] * Pv_k[2];
+      }
 
-          uVec[c] += A_kc0 * Pl_k[0] + A_kc1 * Pl_k[1] + A_kc2 * Pl_k[2];
+      sigma0Aposteriori = dof > 0 ? Math.sqrt(Math.max(1e-12, vPv / dof)) : 1.0;
+      sigma0Sq = sigma0Aposteriori * sigma0Aposteriori;
 
-          const PA0 = P_k[0][0] * A_kc0 + P_k[0][1] * A_kc1 + P_k[0][2] * A_kc2;
-          const PA1 = P_k[1][0] * A_kc0 + P_k[1][1] * A_kc1 + P_k[1][2] * A_kc2;
-          const PA2 = P_k[2][0] * A_kc0 + P_k[2][1] * A_kc1 + P_k[2][2] * A_kc2;
+      // Global Model Chi-Square Test (95% confidence)
+      chiLower = dof > 0
+        ? Math.max(0.01, effectiveDof * Math.pow(1 - 2 / (9 * effectiveDof) - 1.96 * Math.sqrt(2 / (9 * effectiveDof)), 3))
+        : 0;
+      chiUpper = dof > 0
+        ? effectiveDof * Math.pow(1 - 2 / (9 * effectiveDof) + 1.96 * Math.sqrt(2 / (9 * effectiveDof)), 3)
+        : 1e9;
+      chiPassed = dof > 0 && vPv >= chiLower && vPv <= chiUpper;
 
-          for (let c2 = 0; c2 < numUnknowns; c2++) {
-            const A_k20 = A[rowStart][c2];
-            const A_k21 = A[rowStart + 1][c2];
-            const A_k22 = A[rowStart + 2][c2];
-            if (A_k20 === 0 && A_k21 === 0 && A_k22 === 0) continue;
+      outliers = [];
+      totalRedundancySum = 0;
+      baselineEvalMap.clear();
 
-            N[c2][c] += A_k20 * PA0 + A_k21 * PA1 + A_k22 * PA2;
+      let worstBaseline: BaselineVector | null = null;
+      let worstW = 0;
+      let worstSpatialV = 0;
+
+      for (let k = 0; k < activeBaselines.length; k++) {
+        const b = activeBaselines[k];
+        const rowStart = 3 * k;
+        const vX = finalResiduals[rowStart];
+        const vY = finalResiduals[rowStart + 1];
+        const vZ = finalResiduals[rowStart + 2];
+
+        const vX_mm = vX * 1000.0;
+        const vY_mm = vY * 1000.0;
+        const vZ_mm = vZ * 1000.0;
+        const spatialV_mm = Math.sqrt(vX_mm * vX_mm + vY_mm * vY_mm + vZ_mm * vZ_mm);
+
+        const uFrom = unknownIndexMap[b.fromId];
+        const uTo = unknownIndexMap[b.toId];
+
+        const ACAT: number[][] = [
+          [0, 0, 0],
+          [0, 0, 0],
+          [0, 0, 0],
+        ];
+
+        if (normalInv) {
+          for (let r = 0; r < 3; r++) {
+            for (let c = 0; c < 3; c++) {
+              ACAT[r][c] =
+                normalInv[3 * uTo + r][3 * uTo + c] +
+                normalInv[3 * uFrom + r][3 * uFrom + c] -
+                normalInv[3 * uTo + r][3 * uFrom + c] -
+                normalInv[3 * uFrom + r][3 * uTo + c];
+            }
           }
         }
-      }
-      lastNormalN = N;
 
-      // Construct Bordered Inner-Constraint System:
-      // [ N   G ]
-      // [ G^T 0 ]
-      // Scale G entries proportionally to sqrt(meanDiag(N)) for optimal numerical conditioning,
-      // which leaves Moore-Penrose pseudoinverse N+ block invariant.
-      let diagSum = 0;
-      for (let i = 0; i < numUnknowns; i++) diagSum += Math.abs(N[i][i]);
-      const gScale = Math.sqrt(Math.max(1.0, diagSum / Math.max(1, numUnknowns)));
-      const gEntry = gWeight * gScale;
+        const Q_k = [
+          [b.qxx || 1e-5, b.qxy || 0, b.qzx || 0],
+          [b.qxy || 0, b.qyy || 1e-5, b.qyz || 0],
+          [b.qzx || 0, b.qyz || 0, b.qzz || 1e-5],
+        ];
 
-      const bordered: number[][] = Array.from({ length: dimBordered }, () =>
-        Array(dimBordered).fill(0)
-      );
-      for (let r = 0; r < numUnknowns; r++) {
-        for (let c = 0; c < numUnknowns; c++) {
-          bordered[r][c] = N[r][c];
+        const qvv_X = Math.max(1e-12, Q_k[0][0] - ACAT[0][0]);
+        const qvv_Y = Math.max(1e-12, Q_k[1][1] - ACAT[1][1]);
+        const qvv_Z = Math.max(1e-12, Q_k[2][2] - ACAT[2][2]);
+
+        const P_k = P_blocks[k];
+        let r_k = 0;
+        for (let i = 0; i < 3; i++) {
+          for (let j = 0; j < 3; j++) {
+            const qvv_ij = Q_k[i][j] - ACAT[i][j];
+            r_k += qvv_ij * P_k[j][i];
+          }
         }
-      }
-      for (let stIdx = 0; stIdx < nStn; stIdx++) {
-        const colBase = 3 * stIdx;
-        for (let axis = 0; axis < 3; axis++) {
-          bordered[colBase + axis][numUnknowns + axis] = gEntry;
-          bordered[numUnknowns + axis][colBase + axis] = gEntry;
+        r_k = Math.max(0, Math.min(3, r_k));
+        totalRedundancySum += r_k;
+
+        const wX = dof > 0 && qvv_X > 1e-11 ? Math.abs(vX) / (sigma0Aposteriori * Math.sqrt(qvv_X)) : 0;
+        const wY = dof > 0 && qvv_Y > 1e-11 ? Math.abs(vY) / (sigma0Aposteriori * Math.sqrt(qvv_Y)) : 0;
+        const wZ = dof > 0 && qvv_Z > 1e-11 ? Math.abs(vZ) / (sigma0Aposteriori * Math.sqrt(qvv_Z)) : 0;
+        const maxW = Math.max(wX, wY, wZ);
+
+        const isOutlier = maxW > wCrit;
+        if (isOutlier) {
+          outliers.push(b.id);
+          if (maxW > worstW) {
+            worstW = maxW;
+            worstBaseline = b;
+            worstSpatialV = spatialV_mm;
+          }
         }
+
+        baselineEvalMap.set(b.id, {
+          vX_mm,
+          vY_mm,
+          vZ_mm,
+          spatialV_mm,
+          maxW,
+          r_k,
+          isOutlier,
+        });
       }
 
-      const borderedInv = invertMatrixGaussJordan(bordered);
-      if (!borderedInv) return null;
+      // If autoExclude is enabled and outliers exist, exclude the worst one and iterate
+      if (autoExclude && outliers.length > 0 && worstBaseline && outlierPass < maxOutlierPasses) {
+        const candidateRemaining = activeBaselines.filter((b) => b.id !== worstBaseline!.id);
+        const candidateDof = 3 * candidateRemaining.length - (numUnknowns - 3);
 
-      // Upper-left (numUnknowns x numUnknowns) block is exact Moore-Penrose pseudoinverse N+
-      normalInv = Array.from({ length: numUnknowns }, (_, r) =>
-        borderedInv[r].slice(0, numUnknowns)
-      );
-
-      const dx_hat: number[] = Array(numUnknowns).fill(0);
-      for (let r = 0; r < numUnknowns; r++) {
-        for (let c = 0; c < numUnknowns; c++) {
-          dx_hat[r] += normalInv[r][c] * uVec[c];
-        }
-      }
-
-      let stepMaxMm = 0;
-      for (let i = 0; i < nStn; i++) {
-        const stId = unknownStationIds[i];
-        const colStart = 3 * i;
-        const dX = dx_hat[colStart];
-        const dY = dx_hat[colStart + 1];
-        const dZ = dx_hat[colStart + 2];
-
-        currentCoords[stId].x += dX;
-        currentCoords[stId].y += dY;
-        currentCoords[stId].z += dZ;
-
-        const dispMm = Math.sqrt(dX * dX + dY * dY + dZ * dZ) * 1000.0;
-        if (dispMm > stepMaxMm) stepMaxMm = dispMm;
-      }
-
-      maxDisplacementMm = stepMaxMm;
-      if (stepMaxMm < 0.05) break;
-    }
-
-    // Calculate final residuals v = (X_to - X_from) - b_obs
-    finalResiduals = Array(numObs).fill(0);
-    vPv = 0;
-
-    for (let k = 0; k < activeBaselines.length; k++) {
-      const b = activeBaselines[k];
-      const rowStart = 3 * k;
-
-      const fromCoord = currentCoords[b.fromId];
-      const toCoord = currentCoords[b.toId];
-      if (!fromCoord || !toCoord) continue;
-
-      const vX = toCoord.x - fromCoord.x - b.dX;
-      const vY = toCoord.y - fromCoord.y - b.dY;
-      const vZ = toCoord.z - fromCoord.z - b.dZ;
-
-      finalResiduals[rowStart] = vX;
-      finalResiduals[rowStart + 1] = vY;
-      finalResiduals[rowStart + 2] = vZ;
-
-      const P_k = P_blocks[k];
-      const v_k = [vX, vY, vZ];
-      const Pv_k = [
-        P_k[0][0] * v_k[0] + P_k[0][1] * v_k[1] + P_k[0][2] * v_k[2],
-        P_k[1][0] * v_k[0] + P_k[1][1] * v_k[1] + P_k[1][2] * v_k[2],
-        P_k[2][0] * v_k[0] + P_k[2][1] * v_k[1] + P_k[2][2] * v_k[2],
-      ];
-
-      vPv += v_k[0] * Pv_k[0] + v_k[1] * Pv_k[1] + v_k[2] * Pv_k[2];
-    }
-
-    const sigma0Aposteriori = dof > 0 ? Math.sqrt(Math.max(1e-12, vPv / dof)) : 1.0;
-    const sigma0Sq = sigma0Aposteriori * sigma0Aposteriori;
-
-    // Global Model Chi-Square Test (95% confidence)
-    const chiLower = dof > 0
-      ? Math.max(0.01, effectiveDof * Math.pow(1 - 2 / (9 * effectiveDof) - 1.96 * Math.sqrt(2 / (9 * effectiveDof)), 3))
-      : 0;
-    const chiUpper = dof > 0
-      ? effectiveDof * Math.pow(1 - 2 / (9 * effectiveDof) + 1.96 * Math.sqrt(2 / (9 * effectiveDof)), 3)
-      : 1e9;
-    const chiPassed = dof > 0 && vPv >= chiLower && vPv <= chiUpper;
-
-    const outliers: string[] = [];
-    finalBaselines = [];
-    let totalRedundancySum = 0;
-
-    for (let k = 0; k < activeBaselines.length; k++) {
-      const b = activeBaselines[k];
-      const rowStart = 3 * k;
-      const vX = finalResiduals[rowStart];
-      const vY = finalResiduals[rowStart + 1];
-      const vZ = finalResiduals[rowStart + 2];
-
-      const vX_mm = vX * 1000.0;
-      const vY_mm = vY * 1000.0;
-      const vZ_mm = vZ * 1000.0;
-      const spatialV_mm = Math.sqrt(vX_mm * vX_mm + vY_mm * vY_mm + vZ_mm * vZ_mm);
-
-      const uFrom = unknownIndexMap[b.fromId];
-      const uTo = unknownIndexMap[b.toId];
-
-      const ACAT: number[][] = [
-        [0, 0, 0],
-        [0, 0, 0],
-        [0, 0, 0],
-      ];
-
-      if (normalInv) {
-        for (let r = 0; r < 3; r++) {
-          for (let c = 0; c < 3; c++) {
-            ACAT[r][c] =
-              normalInv[3 * uTo + r][3 * uTo + c] +
-              normalInv[3 * uFrom + r][3 * uFrom + c] -
-              normalInv[3 * uTo + r][3 * uFrom + c] -
-              normalInv[3 * uFrom + r][3 * uTo + c];
+        if (
+          candidateRemaining.length >= 1 &&
+          candidateDof >= 1 &&
+          checkNetworkConnectivity(stationKeys, candidateRemaining)
+        ) {
+          const target = workingBaselines.find((b) => b.id === worstBaseline!.id);
+          if (target) {
+            target.excluded = true;
+            target.isOutlier = true;
+            target.exclusionReason = `Baarda w-testi kaba hata tespiti (w = ${worstW.toFixed(2)} > ${wCrit.toFixed(2)})`;
+            excludedRecords.push({
+              baselineId: target.id,
+              fromId: target.fromId,
+              toId: target.toId,
+              reason: target.exclusionReason,
+              wScore: Math.round(worstW * 100) / 100,
+              spatialV: Math.round(worstSpatialV * 10) / 10,
+            });
+            outlierIterations++;
+            continue; // Re-adjust without the outlier baseline!
           }
         }
       }
 
-      const Q_k = [
-        [b.qxx || 1e-5, b.qxy || 0, b.qzx || 0],
-        [b.qxy || 0, b.qyy || 1e-5, b.qyz || 0],
-        [b.qzx || 0, b.qyz || 0, b.qzz || 1e-5],
-      ];
-
-      const qvv_X = Math.max(1e-12, Q_k[0][0] - ACAT[0][0]);
-      const qvv_Y = Math.max(1e-12, Q_k[1][1] - ACAT[1][1]);
-      const qvv_Z = Math.max(1e-12, Q_k[2][2] - ACAT[2][2]);
-
-      const P_k = P_blocks[k];
-      let r_k = 0;
-      for (let i = 0; i < 3; i++) {
-        for (let j = 0; j < 3; j++) {
-          const qvv_ij = Q_k[i][j] - ACAT[i][j];
-          r_k += qvv_ij * P_k[j][i];
-        }
-      }
-      r_k = Math.max(0, Math.min(3, r_k));
-      totalRedundancySum += r_k;
-
-      const wX = dof > 0 && qvv_X > 1e-11 ? Math.abs(vX) / (sigma0Aposteriori * Math.sqrt(qvv_X)) : 0;
-      const wY = dof > 0 && qvv_Y > 1e-11 ? Math.abs(vY) / (sigma0Aposteriori * Math.sqrt(qvv_Y)) : 0;
-      const wZ = dof > 0 && qvv_Z > 1e-11 ? Math.abs(vZ) / (sigma0Aposteriori * Math.sqrt(qvv_Z)) : 0;
-      const maxW = Math.max(wX, wY, wZ);
-
-      const isOutlier = maxW > config.wCrit;
-      if (isOutlier) outliers.push(b.id);
-
-      finalBaselines.push({
-        ...b,
-        vX: vX_mm,
-        vY: vY_mm,
-        vZ: vZ_mm,
-        spatialV: spatialV_mm,
-        wTest: maxW,
-        redundancyNumber: r_k,
-        isOutlier,
-      });
+      // No more outliers to exclude or connectivity reached
+      break;
     }
 
-    let nonZeroACount = 0;
+    nonZeroACount = 0;
     for (let r = 0; r < numObs; r++) {
       for (let c = 0; c < numUnknowns; c++) {
-        if (A[r][c] !== 0) nonZeroACount++;
+        if (A[r] && A[r][c] !== 0) nonZeroACount++;
       }
     }
     const totalElements = numObs * numUnknowns;
@@ -2342,6 +2440,28 @@ export function perform3DNetworkAdjustment(
       };
     }
 
+    const finalBaselines: BaselineVector[] = workingBaselines.map((b) => {
+      const evalData = baselineEvalMap.get(b.id);
+      if (evalData && !b.excluded) {
+        return {
+          ...b,
+          vX: evalData.vX_mm,
+          vY: evalData.vY_mm,
+          vZ: evalData.vZ_mm,
+          spatialV: evalData.spatialV_mm,
+          wTest: evalData.maxW,
+          redundancyNumber: evalData.r_k,
+          isOutlier: evalData.isOutlier,
+        };
+      }
+      return {
+        ...b,
+        excluded: true,
+        isOutlier: b.isOutlier || false,
+        exclusionReason: b.exclusionReason || (b.isOutlier ? `Baarda w-testi kaba hata tespiti` : undefined),
+      };
+    });
+
     return {
       mode,
       fixedStationIds,
@@ -2371,7 +2491,9 @@ export function perform3DNetworkAdjustment(
       stations: adjustedStations,
       baselines: finalBaselines,
       outliers,
+      excludedBaselines: excludedRecords,
       iterations,
+      outlierIterations,
       maxDisplacementMm,
       adjustedAt: new Date().toISOString(),
     };
@@ -2562,6 +2684,8 @@ export const DEFAULT_CONFIG: JobConfig = {
   loopTolerancePpm: 1.0,
   baardaAlpha: 0.001,
   wCrit: 3.29,
+  autoExcludeOutliers: true,
+  maxOutlierIterations: 5,
 };
 
 // Empty initial network elements (No demo data)

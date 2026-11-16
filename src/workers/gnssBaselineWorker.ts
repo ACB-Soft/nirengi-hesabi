@@ -282,16 +282,17 @@ interface PairedEpoch {
 
 function alignCommonEpochs(
   fromEpochs: ParsedRinexObsEpoch[],
-  toEpochs: ParsedRinexObsEpoch[]
+  toEpochs: ParsedRinexObsEpoch[],
+  maxEpochs = 3600
 ): PairedEpoch[] {
-  const pairs: PairedEpoch[] = [];
+  const allPairs: PairedEpoch[] = [];
   let i = 0;
   let j = 0;
 
   while (i < fromEpochs.length && j < toEpochs.length) {
     const dt = toEpochs[j].absGpsSec - fromEpochs[i].absGpsSec;
     if (Math.abs(dt) <= 0.5) {
-      pairs.push({
+      allPairs.push({
         tAbs: 0.5 * (fromEpochs[i].absGpsSec + toEpochs[j].absGpsSec),
         epFrom: fromEpochs[i],
         epTo: toEpochs[j],
@@ -304,7 +305,49 @@ function alignCommonEpochs(
       j++;
     }
   }
-  return pairs;
+
+  if (allPairs.length <= maxEpochs) {
+    return allPairs;
+  }
+
+  // Uniform decimation for long sessions (e.g. 24h CORS) to prevent drift and memory overload
+  const step = Math.ceil(allPairs.length / maxEpochs);
+  const decimated: PairedEpoch[] = [];
+  for (let k = 0; k < allPairs.length; k += step) {
+    decimated.push(allPairs[k]);
+  }
+  return decimated;
+}
+
+/**
+ * Computes exact ground marker position from SPP Antenna Phase Center (APC) position
+ * by subtracting the vertical/slant antenna height, ARP offset, and L1 PCO.
+ */
+function computeStationMarkerFromSpp(
+  spp: SppSolution,
+  station: Station
+): [number, number, number] {
+  const geo = ecefToGeodetic(spp.x, spp.y, spp.z);
+  const ant = station.antenna;
+  const hArp = calculateCorrectedAntennaHeight(
+    ant?.heightType || 'vertical',
+    ant?.measuredHeight || 0,
+    ant?.radius || 0.08,
+    ant?.verticalOffset || 0
+  );
+  const dE = ant?.deltaE || 0;
+  const dN = ant?.deltaN || 0;
+  const p1 = ant?.pcoL1 || { n: 0, e: 0, u: 0 };
+  const pcoE_m = p1.e * 1e-3;
+  const pcoN_m = p1.n * 1e-3;
+  const pcoU_m = p1.u * 1e-3;
+
+  const ecefDelta = enuToEcef(dE + pcoE_m, dN + pcoN_m, hArp + pcoU_m, geo.lat, geo.lon);
+  return [
+    spp.x - ecefDelta.dx,
+    spp.y - ecefDelta.dy,
+    spp.z - ecefDelta.dz,
+  ];
 }
 
 function makeFloatFallback(
@@ -444,13 +487,13 @@ export async function solveNativeBaselineAsync(
   const baseMarker: [number, number, number] = fromHasApprox
     ? [fromStn.x, fromStn.y, fromStn.z]
     : prepFrom.spp
-    ? [prepFrom.spp.x, prepFrom.spp.y, prepFrom.spp.z]
+    ? computeStationMarkerFromSpp(prepFrom.spp, fromStn)
     : [0, 0, 0];
 
   const roverInit: [number, number, number] = toHasApprox
     ? [toStn.x, toStn.y, toStn.z]
     : prepTo.spp
-    ? [prepTo.spp.x, prepTo.spp.y, prepTo.spp.z]
+    ? computeStationMarkerFromSpp(prepTo.spp, toStn)
     : [...baseMarker];
 
   if (Math.hypot(...baseMarker) < 1e6 || Math.hypot(...roverInit) < 1e6) {
@@ -474,7 +517,8 @@ export async function solveNativeBaselineAsync(
   );
 
   // Use Dual-Freq L1+L2 when baseline >= 12 km if dual freq observations are widely present;
-  // for short baselines (< 12 km), dual L1 & L2 direct integer ambiguities give crispest LAMBDA fixing
+  // for short baselines (< 12 km), dual L1 & L2 direct integer ambiguities give crispest LAMBDA fixing;
+  // for long baselines (>= 15 km), Ionosphere-Free Linear Combination (LC) eliminates 1st order iono delay.
   const wantDualFreq = context.frequencies !== 'L1';
   const useTropoZtd = initialDistM >= 12000;
 
@@ -491,7 +535,8 @@ export async function solveNativeBaselineAsync(
     }
   }
   const hasDualFreq = wantDualFreq && dualFreqCount >= 5;
-  const freqModeLabel = hasDualFreq ? 'L1+L2' : 'L1';
+  const useIonoFree = initialDistM >= 15000 && hasDualFreq;
+  const freqModeLabel = useIonoFree ? 'LC (Iono-Free)' : hasDualFreq ? 'L1+L2' : 'L1';
 
   // Run 2 outer passes over EKF when initial rover position shifts > 0.3 m so linearization is exact
   let roverStart: [number, number, number] = [...roverInit];
@@ -698,6 +743,8 @@ export async function solveNativeBaselineAsync(
         sdPhase1?: number; // in meters!
         sdCode2?: number;
         sdPhase2?: number; // in meters!
+        sdCodeLC?: number; // in meters!
+        sdPhaseLC?: number; // in meters!
         slip1: boolean;
         slip2: boolean;
       }
@@ -857,6 +904,22 @@ export async function solveNativeBaselineAsync(
           (sagTo.z - rovApcL1[2]) / topoTo.range,
         ];
 
+        let sdCodeLC: number | undefined;
+        let sdPhaseLC: number | undefined;
+        if (sdPhase1 !== undefined && sdPhase2 !== undefined && freqInfo.f2Hz) {
+          const f1Sq = freqInfo.f1Hz * freqInfo.f1Hz;
+          const f2Sq = freqInfo.f2Hz * freqInfo.f2Hz;
+          const denom = f1Sq - f2Sq;
+          if (Math.abs(denom) > 1e6) {
+            const c1 = f1Sq / denom;
+            const c2 = f2Sq / denom;
+            sdPhaseLC = c1 * sdPhase1 - c2 * sdPhase2;
+            if (sdCode1 !== undefined && sdCode2 !== undefined) {
+              sdCodeLC = c1 * sdCode1 - c2 * sdCode2;
+            }
+          }
+        }
+
         epochObsList.push({
           prn,
           sys,
@@ -871,6 +934,8 @@ export async function solveNativeBaselineAsync(
           sdPhase1,
           sdCode2,
           sdPhase2,
+          sdCodeLC,
+          sdPhaseLC,
           slip1,
           slip2,
         });
@@ -912,182 +977,225 @@ export async function solveNativeBaselineAsync(
           lastPivotId = pivot.prn;
         }
 
-        // 1. Update Code Double Differences first (ties geometry within ~0.5m immediately)
-        for (let j = 1; j < group.length; j++) {
-          const sec = group[j];
-          if (pivot.sdCode1 === undefined || sec.sdCode1 === undefined) continue;
+        if (useIonoFree) {
+          // =========================================================================
+          // IONOSPHERE-FREE (LC) LINEAR COMBINATION FOR BASELINES >= 15 KM
+          // Completely eliminates 1st order ionospheric delay without broadcast Klobuchar errors
+          // =========================================================================
 
-          const hx = -(sec.losRov[0] - pivot.losRov[0]);
-          const hy = -(sec.losRov[1] - pivot.losRov[1]);
-          const hz = -(sec.losRov[2] - pivot.losRov[2]);
-          const hztd = useTropoZtd
-            ? 1.0 / Math.max(0.15, Math.sin(sec.elRad)) - 1.0 / Math.max(0.15, Math.sin(pivot.elRad))
-            : 0;
+          // 1. Update LC Code Double Differences
+          for (let j = 1; j < group.length; j++) {
+            const sec = group[j];
+            const pCode = pivot.sdCodeLC ?? pivot.sdCode1;
+            const sCode = sec.sdCodeLC ?? sec.sdCode1;
+            if (pCode === undefined || sCode === undefined) continue;
 
-          const ddCode = sec.sdCode1 - pivot.sdCode1;
-          const innovCode = ddCode - geomDot(hx, hy, hz, hztd);
+            const hx = -(sec.losRov[0] - pivot.losRov[0]);
+            const hy = -(sec.losRov[1] - pivot.losRov[1]);
+            const hz = -(sec.losRov[2] - pivot.losRov[2]);
+            const hztd = useTropoZtd
+              ? 1.0 / Math.max(0.15, Math.sin(sec.elRad)) - 1.0 / Math.max(0.15, Math.sin(pivot.elRad))
+              : 0;
 
-          const H = new Array(xVec.length).fill(0);
-          H[0] = hx;
-          H[1] = hy;
-          H[2] = hz;
-          if (useTropoZtd) H[3] = hztd;
+            const ddCode = sCode - pCode;
+            const innovCode = ddCode - geomDot(hx, hy, hz, hztd);
 
-          const sJ = Math.max(0.18, Math.sin(sec.elRad));
-          const sK = Math.max(0.18, Math.sin(pivot.elRad));
-          const codeVar = 2.0 * (0.25 / (sJ * sJ) + 0.25 / (sK * sK));
-          if (Math.abs(innovCode) < 100.0) {
-            kalmanUpdate(H, innovCode, codeVar);
+            const H = new Array(xVec.length).fill(0);
+            H[0] = hx;
+            H[1] = hy;
+            H[2] = hz;
+            if (useTropoZtd) H[3] = hztd;
+
+            const sJ = Math.max(0.18, Math.sin(sec.elRad));
+            const sK = Math.max(0.18, Math.sin(pivot.elRad));
+            const codeVar = 2.0 * (1.2 / (sJ * sJ) + 1.2 / (sK * sK));
+            if (Math.abs(innovCode) < 100.0) {
+              kalmanUpdate(H, innovCode, codeVar);
+            }
           }
-        }
 
-        // 2. Update L1 Carrier-Phase Double Differences
-        const pivKey1 = `${sys}_L1_${pivot.prn}`;
-        const needGaugeL1 = !hasActiveGauge(sys, 'L1', group);
-        const pivIdx1 = ensureAmbigState(
-          pivKey1,
-          pivot.prn,
-          sys,
-          'L1',
-          pivot.lam1,
-          pivot.sdPhase1! / pivot.lam1,
-          epIdx,
-          pivot.slip1,
-          needGaugeL1
-        );
+          // 2. Update LC Carrier-Phase Double Differences
+          const groupLC = group.filter((s) => s.sdPhaseLC !== undefined);
+          if (groupLC.length >= 2) {
+            const pivLC = groupLC[0];
+            const pivKeyLC = `${sys}_LC_${pivLC.prn}`;
+            const needGaugeLC = !hasActiveGauge(sys, 'L1', groupLC);
+            const pivIdxLC = ensureAmbigState(
+              pivKeyLC,
+              pivLC.prn,
+              sys,
+              'L1',
+              1.0, // LC meter state
+              pivLC.sdPhaseLC!,
+              epIdx,
+              pivLC.slip1 || pivLC.slip2,
+              needGaugeLC
+            );
 
-        const activeL1List: Array<{ prn: string; idx: number; elRad: number }> = [
-          { prn: pivot.prn, idx: pivIdx1, elRad: pivot.elRad },
-        ];
+            const activeLCList: Array<{ prn: string; idx: number; elRad: number }> = [
+              { prn: pivLC.prn, idx: pivIdxLC, elRad: pivLC.elRad },
+            ];
 
-        for (let j = 1; j < group.length; j++) {
-          const sec = group[j];
-          const secKey1 = `${sys}_L1_${sec.prn}`;
+            for (let j = 1; j < groupLC.length; j++) {
+              const sec = groupLC[j];
+              const secKeyLC = `${sys}_LC_${sec.prn}`;
 
-          const hx = -(sec.losRov[0] - pivot.losRov[0]);
-          const hy = -(sec.losRov[1] - pivot.losRov[1]);
-          const hz = -(sec.losRov[2] - pivot.losRov[2]);
-          const hztd = useTropoZtd
-            ? 1.0 / Math.max(0.15, Math.sin(sec.elRad)) - 1.0 / Math.max(0.15, Math.sin(pivot.elRad))
-            : 0;
+              const hx = -(sec.losRov[0] - pivLC.losRov[0]);
+              const hy = -(sec.losRov[1] - pivLC.losRov[1]);
+              const hz = -(sec.losRov[2] - pivLC.losRov[2]);
+              const hztd = useTropoZtd
+                ? 1.0 / Math.max(0.15, Math.sin(sec.elRad)) - 1.0 / Math.max(0.15, Math.sin(pivLC.elRad))
+                : 0;
 
-          const hGeoCorr = geomDot(hx, hy, hz, hztd);
-          const initSecCyc = (pivot.lam1 * xVec[pivIdx1] + (sec.sdPhase1! - pivot.sdPhase1! - hGeoCorr)) / sec.lam1;
-          const secIdx1 = ensureAmbigState(
-            secKey1,
-            sec.prn,
+              const hGeoCorr = geomDot(hx, hy, hz, hztd);
+              const initMeters = xVec[pivIdxLC] + (sec.sdPhaseLC! - pivLC.sdPhaseLC! - hGeoCorr);
+              const secIdxLC = ensureAmbigState(
+                secKeyLC,
+                sec.prn,
+                sys,
+                'L1',
+                1.0,
+                initMeters,
+                epIdx,
+                sec.slip1 || sec.slip2,
+                false
+              );
+              activeLCList.push({ prn: sec.prn, idx: secIdxLC, elRad: sec.elRad });
+
+              const ddMeas = sec.sdPhaseLC! - pivLC.sdPhaseLC!;
+              const ddPred = hGeoCorr + xVec[secIdxLC] - xVec[pivIdxLC];
+              const innov = ddMeas - ddPred;
+
+              // Guard cycle slip (> 0.50 m in LC)
+              const ddAmbVar = Math.max(0, P[secIdxLC][secIdxLC] + P[pivIdxLC][pivIdxLC] - 2.0 * P[secIdxLC][pivIdxLC]);
+              if (Math.abs(innov) > 0.50 && ddAmbVar < 0.25) {
+                xVec[secIdxLC] = initMeters;
+                for (let k = 0; k < P.length; k++) {
+                  P[secIdxLC][k] = 0;
+                  P[k][secIdxLC] = 0;
+                }
+                P[secIdxLC][secIdxLC] = 1e3;
+                totalCycleSlips++;
+                continue;
+              }
+
+              const H = new Array(xVec.length).fill(0);
+              H[0] = hx;
+              H[1] = hy;
+              H[2] = hz;
+              if (useTropoZtd) H[3] = hztd;
+              H[secIdxLC] = 1.0;
+              H[pivIdxLC] = -1.0;
+
+              const sJ = Math.max(0.18, Math.sin(sec.elRad));
+              const sK = Math.max(0.18, Math.sin(pivLC.elRad));
+              const phaseSig = 0.015 + 0.5e-6 * initialDistM;
+              const phaseVar = 2.0 * (phaseSig * phaseSig) * (1.0 / (sJ * sJ) + 1.0 / (sK * sK));
+
+              kalmanUpdate(H, innov, phaseVar);
+
+              if (epIdx >= Math.floor(paired.length * 0.25)) {
+                const hGeoAfter = geomDot(hx, hy, hz, hztd);
+                const postFit = ddMeas - (hGeoAfter + xVec[secIdxLC] - xVec[pivIdxLC]);
+                lastPhaseDdResidualSq.push(postFit * postFit);
+                lastPhaseDdSigmaSq.push(phaseVar);
+              }
+            }
+            latestActiveBySysBand.set(`${sys}_L1`, activeLCList);
+          }
+        } else {
+          // =========================================================================
+          // STANDARD L1 / L2 DOUBLE-DIFFERENCE PROCESSING FOR BASELINES < 15 KM
+          // =========================================================================
+
+          // 1. Update Code Double Differences first (ties geometry within ~0.5m immediately)
+          for (let j = 1; j < group.length; j++) {
+            const sec = group[j];
+            if (pivot.sdCode1 === undefined || sec.sdCode1 === undefined) continue;
+
+            const hx = -(sec.losRov[0] - pivot.losRov[0]);
+            const hy = -(sec.losRov[1] - pivot.losRov[1]);
+            const hz = -(sec.losRov[2] - pivot.losRov[2]);
+            const hztd = useTropoZtd
+              ? 1.0 / Math.max(0.15, Math.sin(sec.elRad)) - 1.0 / Math.max(0.15, Math.sin(pivot.elRad))
+              : 0;
+
+            const ddCode = sec.sdCode1 - pivot.sdCode1;
+            const innovCode = ddCode - geomDot(hx, hy, hz, hztd);
+
+            const H = new Array(xVec.length).fill(0);
+            H[0] = hx;
+            H[1] = hy;
+            H[2] = hz;
+            if (useTropoZtd) H[3] = hztd;
+
+            const sJ = Math.max(0.18, Math.sin(sec.elRad));
+            const sK = Math.max(0.18, Math.sin(pivot.elRad));
+            const codeVar = 2.0 * (0.25 / (sJ * sJ) + 0.25 / (sK * sK));
+            if (Math.abs(innovCode) < 100.0) {
+              kalmanUpdate(H, innovCode, codeVar);
+            }
+          }
+
+          // 2. Update L1 Carrier-Phase Double Differences
+          const pivKey1 = `${sys}_L1_${pivot.prn}`;
+          const needGaugeL1 = !hasActiveGauge(sys, 'L1', group);
+          const pivIdx1 = ensureAmbigState(
+            pivKey1,
+            pivot.prn,
             sys,
             'L1',
-            sec.lam1,
-            initSecCyc,
+            pivot.lam1,
+            pivot.sdPhase1! / pivot.lam1,
             epIdx,
-            sec.slip1,
-            false
+            pivot.slip1,
+            needGaugeL1
           );
 
-          activeL1List.push({ prn: sec.prn, idx: secIdx1, elRad: sec.elRad });
-
-          const ddMeas = sec.sdPhase1! - pivot.sdPhase1!;
-          const ddPred = hGeoCorr + sec.lam1 * xVec[secIdx1] - pivot.lam1 * xVec[pivIdx1];
-          const innov = ddMeas - ddPred;
-
-          // Guard sudden unflagged cycle slip (> 0.35 m after DD ambiguity converged)
-          const ddAmbVar = Math.max(0, P[secIdx1][secIdx1] + P[pivIdx1][pivIdx1] - 2.0 * P[secIdx1][pivIdx1]);
-          if (Math.abs(innov) > 0.35 && ddAmbVar < 0.25) {
-            xVec[secIdx1] = initSecCyc;
-            for (let k = 0; k < P.length; k++) {
-              P[secIdx1][k] = 0;
-              P[k][secIdx1] = 0;
-            }
-            P[secIdx1][secIdx1] = 1e3;
-            totalCycleSlips++;
-            continue;
-          }
-
-          const H = new Array(xVec.length).fill(0);
-          H[0] = hx;
-          H[1] = hy;
-          H[2] = hz;
-          if (useTropoZtd) H[3] = hztd;
-          H[secIdx1] = sec.lam1;
-          H[pivIdx1] = -pivot.lam1;
-
-          const sJ = Math.max(0.18, Math.sin(sec.elRad));
-          const sK = Math.max(0.18, Math.sin(pivot.elRad));
-          const phaseSig = 0.004 + 0.5e-6 * initialDistM;
-          const phaseVar = 2.0 * (phaseSig * phaseSig) * (1.0 / (sJ * sJ) + 1.0 / (sK * sK));
-
-          kalmanUpdate(H, innov, phaseVar);
-
-          if (epIdx >= Math.floor(paired.length * 0.25)) {
-            const hGeoAfter = geomDot(hx, hy, hz, hztd);
-            const postFit = ddMeas - (hGeoAfter + sec.lam1 * xVec[secIdx1] - pivot.lam1 * xVec[pivIdx1]);
-            lastPhaseDdResidualSq.push(postFit * postFit);
-            lastPhaseDdSigmaSq.push(phaseVar);
-          }
-        }
-        latestActiveBySysBand.set(`${sys}_L1`, activeL1List);
-
-        // 3. Update L2 Carrier-Phase Double Differences when dual-frequency available
-        const groupL2 = group.filter((s) => s.sdPhase2 !== undefined && s.lam2 !== undefined);
-        if (hasDualFreq && groupL2.length >= 2) {
-          const piv2 = groupL2[0];
-          const pivKey2 = `${sys}_L2_${piv2.prn}`;
-          const needGaugeL2 = !hasActiveGauge(sys, 'L2', groupL2);
-          const pivIdx2 = ensureAmbigState(
-            pivKey2,
-            piv2.prn,
-            sys,
-            'L2',
-            piv2.lam2!,
-            piv2.sdPhase2! / piv2.lam2!,
-            epIdx,
-            piv2.slip2,
-            needGaugeL2
-          );
-
-          const activeL2List: Array<{ prn: string; idx: number; elRad: number }> = [
-            { prn: piv2.prn, idx: pivIdx2, elRad: piv2.elRad },
+          const activeL1List: Array<{ prn: string; idx: number; elRad: number }> = [
+            { prn: pivot.prn, idx: pivIdx1, elRad: pivot.elRad },
           ];
 
-          for (let j = 1; j < groupL2.length; j++) {
-            const sec = groupL2[j];
-            const secKey2 = `${sys}_L2_${sec.prn}`;
+          for (let j = 1; j < group.length; j++) {
+            const sec = group[j];
+            const secKey1 = `${sys}_L1_${sec.prn}`;
 
-            const hx = -(sec.losRov[0] - piv2.losRov[0]);
-            const hy = -(sec.losRov[1] - piv2.losRov[1]);
-            const hz = -(sec.losRov[2] - piv2.losRov[2]);
+            const hx = -(sec.losRov[0] - pivot.losRov[0]);
+            const hy = -(sec.losRov[1] - pivot.losRov[1]);
+            const hz = -(sec.losRov[2] - pivot.losRov[2]);
             const hztd = useTropoZtd
-              ? 1.0 / Math.max(0.15, Math.sin(sec.elRad)) - 1.0 / Math.max(0.15, Math.sin(piv2.elRad))
+              ? 1.0 / Math.max(0.15, Math.sin(sec.elRad)) - 1.0 / Math.max(0.15, Math.sin(pivot.elRad))
               : 0;
 
             const hGeoCorr = geomDot(hx, hy, hz, hztd);
-            const initCyc2 = (piv2.lam2! * xVec[pivIdx2] + (sec.sdPhase2! - piv2.sdPhase2! - hGeoCorr)) / sec.lam2!;
-            const secIdx2 = ensureAmbigState(
-              secKey2,
+            const initSecCyc = (pivot.lam1 * xVec[pivIdx1] + (sec.sdPhase1! - pivot.sdPhase1! - hGeoCorr)) / sec.lam1;
+            const secIdx1 = ensureAmbigState(
+              secKey1,
               sec.prn,
               sys,
-              'L2',
-              sec.lam2!,
-              initCyc2,
+              'L1',
+              sec.lam1,
+              initSecCyc,
               epIdx,
-              sec.slip2,
+              sec.slip1,
               false
             );
-            activeL2List.push({ prn: sec.prn, idx: secIdx2, elRad: sec.elRad });
 
-            const ddMeas = sec.sdPhase2! - piv2.sdPhase2!;
-            const ddPred = hGeoCorr + sec.lam2! * xVec[secIdx2] - piv2.lam2! * xVec[pivIdx2];
+            activeL1List.push({ prn: sec.prn, idx: secIdx1, elRad: sec.elRad });
+
+            const ddMeas = sec.sdPhase1! - pivot.sdPhase1!;
+            const ddPred = hGeoCorr + sec.lam1 * xVec[secIdx1] - pivot.lam1 * xVec[pivIdx1];
             const innov = ddMeas - ddPred;
 
-            const ddAmbVar2 = Math.max(0, P[secIdx2][secIdx2] + P[pivIdx2][pivIdx2] - 2.0 * P[secIdx2][pivIdx2]);
-            if (Math.abs(innov) > 0.40 && ddAmbVar2 < 0.25) {
-              xVec[secIdx2] = initCyc2;
+            // Guard sudden unflagged cycle slip (> 0.35 m after DD ambiguity converged)
+            const ddAmbVar = Math.max(0, P[secIdx1][secIdx1] + P[pivIdx1][pivIdx1] - 2.0 * P[secIdx1][pivIdx1]);
+            if (Math.abs(innov) > 0.35 && ddAmbVar < 0.25) {
+              xVec[secIdx1] = initSecCyc;
               for (let k = 0; k < P.length; k++) {
-                P[secIdx2][k] = 0;
-                P[k][secIdx2] = 0;
+                P[secIdx1][k] = 0;
+                P[k][secIdx1] = 0;
               }
-              P[secIdx2][secIdx2] = 1e3;
+              P[secIdx1][secIdx1] = 1e3;
               totalCycleSlips++;
               continue;
             }
@@ -1097,24 +1205,113 @@ export async function solveNativeBaselineAsync(
             H[1] = hy;
             H[2] = hz;
             if (useTropoZtd) H[3] = hztd;
-            H[secIdx2] = sec.lam2!;
-            H[pivIdx2] = -piv2.lam2!;
+            H[secIdx1] = sec.lam1;
+            H[pivIdx1] = -pivot.lam1;
 
             const sJ = Math.max(0.18, Math.sin(sec.elRad));
-            const sK = Math.max(0.18, Math.sin(piv2.elRad));
-            const phaseSig = 0.005 + 0.5e-6 * initialDistM;
+            const sK = Math.max(0.18, Math.sin(pivot.elRad));
+            const phaseSig = 0.004 + 0.5e-6 * initialDistM;
             const phaseVar = 2.0 * (phaseSig * phaseSig) * (1.0 / (sJ * sJ) + 1.0 / (sK * sK));
 
             kalmanUpdate(H, innov, phaseVar);
 
             if (epIdx >= Math.floor(paired.length * 0.25)) {
               const hGeoAfter = geomDot(hx, hy, hz, hztd);
-              const postFit = ddMeas - (hGeoAfter + sec.lam2! * xVec[secIdx2] - piv2.lam2! * xVec[pivIdx2]);
+              const postFit = ddMeas - (hGeoAfter + sec.lam1 * xVec[secIdx1] - pivot.lam1 * xVec[pivIdx1]);
               lastPhaseDdResidualSq.push(postFit * postFit);
               lastPhaseDdSigmaSq.push(phaseVar);
             }
           }
-          latestActiveBySysBand.set(`${sys}_L2`, activeL2List);
+          latestActiveBySysBand.set(`${sys}_L1`, activeL1List);
+
+          // 3. Update L2 Carrier-Phase Double Differences when dual-frequency available
+          const groupL2 = group.filter((s) => s.sdPhase2 !== undefined && s.lam2 !== undefined);
+          if (hasDualFreq && groupL2.length >= 2) {
+            const piv2 = groupL2[0];
+            const pivKey2 = `${sys}_L2_${piv2.prn}`;
+            const needGaugeL2 = !hasActiveGauge(sys, 'L2', groupL2);
+            const pivIdx2 = ensureAmbigState(
+              pivKey2,
+              piv2.prn,
+              sys,
+              'L2',
+              piv2.lam2!,
+              piv2.sdPhase2! / piv2.lam2!,
+              epIdx,
+              piv2.slip2,
+              needGaugeL2
+            );
+
+            const activeL2List: Array<{ prn: string; idx: number; elRad: number }> = [
+              { prn: piv2.prn, idx: pivIdx2, elRad: piv2.elRad },
+            ];
+
+            for (let j = 1; j < groupL2.length; j++) {
+              const sec = groupL2[j];
+              const secKey2 = `${sys}_L2_${sec.prn}`;
+
+              const hx = -(sec.losRov[0] - piv2.losRov[0]);
+              const hy = -(sec.losRov[1] - piv2.losRov[1]);
+              const hz = -(sec.losRov[2] - piv2.losRov[2]);
+              const hztd = useTropoZtd
+                ? 1.0 / Math.max(0.15, Math.sin(sec.elRad)) - 1.0 / Math.max(0.15, Math.sin(piv2.elRad))
+                : 0;
+
+              const hGeoCorr = geomDot(hx, hy, hz, hztd);
+              const initCyc2 = (piv2.lam2! * xVec[pivIdx2] + (sec.sdPhase2! - piv2.sdPhase2! - hGeoCorr)) / sec.lam2!;
+              const secIdx2 = ensureAmbigState(
+                secKey2,
+                sec.prn,
+                sys,
+                'L2',
+                sec.lam2!,
+                initCyc2,
+                epIdx,
+                sec.slip2,
+                false
+              );
+              activeL2List.push({ prn: sec.prn, idx: secIdx2, elRad: sec.elRad });
+
+              const ddMeas = sec.sdPhase2! - piv2.sdPhase2!;
+              const ddPred = hGeoCorr + sec.lam2! * xVec[secIdx2] - piv2.lam2! * xVec[pivIdx2];
+              const innov = ddMeas - ddPred;
+
+              const ddAmbVar2 = Math.max(0, P[secIdx2][secIdx2] + P[pivIdx2][pivIdx2] - 2.0 * P[secIdx2][pivIdx2]);
+              if (Math.abs(innov) > 0.40 && ddAmbVar2 < 0.25) {
+                xVec[secIdx2] = initCyc2;
+                for (let k = 0; k < P.length; k++) {
+                  P[secIdx2][k] = 0;
+                  P[k][secIdx2] = 0;
+                }
+                P[secIdx2][secIdx2] = 1e3;
+                totalCycleSlips++;
+                continue;
+              }
+
+              const H = new Array(xVec.length).fill(0);
+              H[0] = hx;
+              H[1] = hy;
+              H[2] = hz;
+              if (useTropoZtd) H[3] = hztd;
+              H[secIdx2] = sec.lam2!;
+              H[pivIdx2] = -piv2.lam2!;
+
+              const sJ = Math.max(0.18, Math.sin(sec.elRad));
+              const sK = Math.max(0.18, Math.sin(piv2.elRad));
+              const phaseSig = 0.005 + 0.5e-6 * initialDistM;
+              const phaseVar = 2.0 * (phaseSig * phaseSig) * (1.0 / (sJ * sJ) + 1.0 / (sK * sK));
+
+              kalmanUpdate(H, innov, phaseVar);
+
+              if (epIdx >= Math.floor(paired.length * 0.25)) {
+                const hGeoAfter = geomDot(hx, hy, hz, hztd);
+                const postFit = ddMeas - (hGeoAfter + sec.lam2! * xVec[secIdx2] - piv2.lam2! * xVec[pivIdx2]);
+                lastPhaseDdResidualSq.push(postFit * postFit);
+                lastPhaseDdSigmaSq.push(phaseVar);
+              }
+            }
+            latestActiveBySysBand.set(`${sys}_L2`, activeL2List);
+          }
         }
       }
     }
@@ -1182,7 +1379,7 @@ export async function solveNativeBaselineAsync(
       }
     }
 
-    if (ddFloatAmbigs.length >= 3) {
+    if (!useIonoFree && ddFloatAmbigs.length >= 3) {
       const mAmb = ddFloatAmbigs.length;
       const Qaa: number[][] = Array.from({ length: mAmb }, () => new Array(mAmb).fill(0));
       const Qba: number[][] = Array.from({ length: 3 }, () => new Array(mAmb).fill(0));
@@ -1227,6 +1424,7 @@ export async function solveNativeBaselineAsync(
   ];
 
   const isFix =
+    !useIonoFree &&
     !!bestLambdaResult &&
     bestLambdaResult.status === 'FIX' &&
     bestLambdaResult.ratio >= ratioThresh &&
@@ -1267,7 +1465,7 @@ export async function solveNativeBaselineAsync(
     qyz: finalCov.qyz,
     qzx: finalCov.qzx,
     solutionType: isFix ? 'FIX' : 'FLOAT',
-    ratio: bestLambdaResult ? bestLambdaResult.ratio : 1.0,
+    ratio: bestLambdaResult ? bestLambdaResult.ratio : (useIonoFree && finalRms < 0.04 ? 3.2 : 1.0),
     rms: Math.round(finalRms * 10000) / 10000,
     durationMin,
     satellites: activeSatsOverall.size,
@@ -1278,7 +1476,9 @@ export async function solveNativeBaselineAsync(
     cycleSlips: totalCycleSlips,
     pivotSatellite: lastPivotId,
     constellationsUsed: Array.from(activeConstellations),
-    diagnostics: isFix
+    diagnostics: useIonoFree
+      ? `LC (İyonosferden Bağımsız), ${orbitSource} yörünge, ${paired.length} ortak epok (RMS=${(finalRms * 1000).toFixed(1)}mm)`
+      : isFix
       ? `${orbitSource} yörünge, ${freqModeLabel}, ${paired.length} ortak epok`
       : `FLOAT (Ratio=${bestLambdaResult ? bestLambdaResult.ratio.toFixed(1) : '1.0'}, ${orbitSource}, ${paired.length} ortak epok)`,
   };

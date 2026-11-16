@@ -249,6 +249,50 @@ export const JobConfigTab: React.FC<Props> = ({ config, onChange, onResetDefault
                 </div>
               </div>
             </div>
+
+            {/* Outlier Exclusion (Baarda & Loop Closure) Settings */}
+            <div className="pt-3 border-t border-slate-100 space-y-2">
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={config.autoExcludeOutliers ?? true}
+                  onChange={(e) => handleChange('autoExcludeOutliers', e.target.checked)}
+                  className="mt-0.5 w-4 h-4 text-sky-600 rounded border-slate-300 focus:ring-sky-500"
+                />
+                <div className="flex-1">
+                  <span className="font-bold text-slate-800">Kaba Hataları Otomatik Dışla</span>
+                  <p className="text-[11px] text-slate-500 leading-tight mt-0.5">
+                    Baarda w-testi (|w| &gt; {config.wCrit ?? 3.29}) ve döngü kapanma hatasına göre ağı bozan kaba hatalı bazları otomatik tespit edip dengelemeden dışlar.
+                  </p>
+                </div>
+              </label>
+
+              {(config.autoExcludeOutliers ?? true) && (
+                <div className="grid grid-cols-2 gap-2 pt-1 pl-6">
+                  <div>
+                    <label className="block text-slate-600 font-medium mb-0.5 text-[11px]">Baarda w-Kritik</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={config.wCrit ?? 3.29}
+                      onChange={(e) => handleChange('wCrit', parseFloat(e.target.value) || 3.29)}
+                      className="w-full px-2 py-1 border border-slate-300 rounded font-mono font-bold text-slate-800 bg-white text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-600 font-medium mb-0.5 text-[11px]">Maks. İterasyon</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="10"
+                      value={config.maxOutlierIterations ?? 5}
+                      onChange={(e) => handleChange('maxOutlierIterations', parseInt(e.target.value, 10) || 5)}
+                      className="w-full px-2 py-1 border border-slate-300 rounded font-mono font-bold text-slate-800 bg-white text-xs"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>

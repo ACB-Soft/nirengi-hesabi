@@ -308,6 +308,8 @@ export const StationsAntennaTab: React.FC<Props> = ({
         radius: isSlant ? editRadius : 0,
         verticalOffset: effectiveOffset,
         correctedHeight: corrected,
+        heightSource: 'USER',
+        isUserEdited: true,
       },
     };
 
@@ -340,9 +342,14 @@ export const StationsAntennaTab: React.FC<Props> = ({
           // Save to local OPFS in background without blocking
           saveRinexFileToOpfs(file).catch(() => {});
 
+          const existingStn = Object.values(stations).find(
+            (s) => s.name.toUpperCase() === summary.metadata.markerName.toUpperCase()
+          );
+
           const finalStation = createStationFromSummary(summary, {
             dom,
             forcedType,
+            existingStation: existingStn,
           });
 
           onAddStation(finalStation);
@@ -1301,7 +1308,23 @@ export const StationsAntennaTab: React.FC<Props> = ({
 
                       {/* 7. Alet Yüksekliği */}
                       <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-800 whitespace-nowrap">
-                        {(st.antenna?.measuredHeight || 0).toFixed(3)}
+                        <div className="flex flex-col items-end gap-0.5">
+                          <span>{(st.antenna?.measuredHeight || 0).toFixed(3)} m</span>
+                          <span
+                            className={`text-[9px] px-1.5 py-0.5 rounded font-sans font-semibold ${
+                              st.antenna?.isUserEdited || st.antenna?.heightSource === 'USER'
+                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                                : 'bg-slate-100 text-slate-600 border border-slate-200'
+                            }`}
+                            title={
+                              st.antenna?.isUserEdited || st.antenna?.heightSource === 'USER'
+                                ? 'Kullanıcı tarafından girilen / korunan yükseklik'
+                                : 'RINEX başlığından okunan ham değer'
+                            }
+                          >
+                            {st.antenna?.isUserEdited || st.antenna?.heightSource === 'USER' ? 'Kullanıcı' : 'RINEX'}
+                          </span>
+                        </div>
                       </td>
 
                       {/* 8. Yükseklik Tipi */}

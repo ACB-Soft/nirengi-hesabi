@@ -33,6 +33,8 @@ export interface JobConfig {
   loopTolerancePpm: number; // e.g. 1.0 ppm
   baardaAlpha: number; // e.g. 0.001
   wCrit: number; // 3.29
+  autoExcludeOutliers?: boolean; // Default true: automatically exclude gross errors
+  maxOutlierIterations?: number; // Default 5
 }
 
 export interface AntennaData {
@@ -42,6 +44,8 @@ export interface AntennaData {
   radius: number; // meters (for slant calculation)
   verticalOffset: number; // meters
   correctedHeight: number; // ARP vertical height (m)
+  heightSource?: 'USER' | 'RINEX'; // Source of antenna height
+  isUserEdited?: boolean; // True if user manually specified or edited in UI
   deltaE?: number; // East eccentricity from marker to ARP (m)
   deltaN?: number; // North eccentricity from marker to ARP (m)
   pcoL1: { n: number; e: number; u: number }; // Phase Center Offset (mm)
@@ -147,6 +151,7 @@ export interface BaselineVector {
   redundancyNumber?: number; // r_i redundancy number (0 to 1)
   isOutlier?: boolean;
   excluded?: boolean;
+  exclusionReason?: string;
 }
 
 export interface LoopClosure {
@@ -177,6 +182,16 @@ export interface MatrixDiagnostics {
   maxCorrelation: number;
 }
 
+export interface ExcludedBaselineRecord {
+  baselineId: string;
+  fromId: string;
+  toId: string;
+  reason: string;
+  wScore: number;
+  spatialV?: number;
+  loopError?: number;
+}
+
 export interface AdjustmentResult {
   mode: AdjustmentMode;
   fixedStationIds: string[];
@@ -198,7 +213,9 @@ export interface AdjustmentResult {
   stations: Record<string, Station>;
   baselines: BaselineVector[];
   outliers: string[]; // baseline IDs flagged by Baarda snooping
+  excludedBaselines?: ExcludedBaselineRecord[]; // Baselines excluded due to gross error (Baarda/Loop)
   iterations: number;
+  outlierIterations?: number;
   maxDisplacementMm: number;
   adjustedAt: string;
 }
