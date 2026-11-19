@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  * 
  * GNSS Post-Processing & 3D Network Adjustment System
- * Types and Interfaces conforming to TUREF / ITRF96, GRS80, BÖHYY and RTKLIB standards.
+ * Types and Interfaces conforming to TUREF / ITRF96, GRS80 and RTKLIB standards.
  */
 
 export type AngleUnit = 'Gon' | 'Degree' | 'DMS';
@@ -188,6 +188,7 @@ export interface ExcludedBaselineRecord {
   toId: string;
   reason: string;
   wScore: number;
+  length?: number;
   spatialV?: number;
   loopError?: number;
 }

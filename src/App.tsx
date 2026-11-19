@@ -70,6 +70,7 @@ import {
   FolderOpen,
   ChevronLeft,
   ChevronRight,
+  AlertTriangle,
 } from 'lucide-react';
 
 type TabKey =
@@ -84,9 +85,9 @@ const WORKFLOW_STEPS: { id: TabKey; title: string; subtitle: string }[] = [
   { id: 'home', title: 'Anasayfa', subtitle: 'Proje oluşturma, açma ve genel durum' },
   { id: 'stations', title: 'İstasyonlar & RINEX', subtitle: 'GNSS istasyonları, RINEX gözlemleri, anten parametreleri ve kalite kontrol (QC)' },
   { id: 'baselines', title: 'Baz Çözümleri', subtitle: 'Statik çift fark bağıl baz çözümleri ve kovaryanslar' },
-  { id: 'loops', title: 'Döngü Kapanmaları', subtitle: 'Bağımsız üçgen kapanışları ve BÖHYY tolerans kontrolü' },
+  { id: 'loops', title: 'Döngü Kapanmaları', subtitle: 'Bağımsız üçgen kapanışları ve bağıl tolerans kontrolü' },
   { id: 'free_adjustment', title: 'Serbest Dengeleme', subtitle: '3D Gauss-Markov serbest ağ dengelemesi ve Baarda kaba hata denetimi' },
-  { id: 'report', title: 'Raporlama & Dışa Aktar', subtitle: 'Resmi BÖHYY karnesi, DXF, KML, GeoJSON ve Excel' },
+  { id: 'report', title: 'Raporlama & Dışa Aktar', subtitle: 'Dengeleme hesap raporu, DXF, KML, GeoJSON ve Excel' },
 ];
 
 export default function App() {
@@ -583,13 +584,17 @@ export default function App() {
                 onClick={() => setActiveTab('home')}
               />
               <div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <h1
                     className="text-base sm:text-lg font-bold tracking-tight text-white cursor-pointer hover:text-sky-300 transition-colors"
                     onClick={() => setActiveTab('home')}
                   >
                     Nirengi Hesabı
                   </h1>
+                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 uppercase tracking-wide">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                    <span>Beta / Geliştirme Sürümü</span>
+                  </span>
                   {config.projectName && (
                     <span className="hidden md:inline-block text-[11px] font-semibold bg-slate-800 text-slate-300 border border-slate-700 px-2 py-0.5 rounded-full max-w-[200px] truncate" title={config.projectName}>
                       {config.projectName}
@@ -617,6 +622,26 @@ export default function App() {
           </div>
         </div>
       </header>
+
+      {/* Development & Beta Warning Banner */}
+      <div className="bg-amber-50 border-b border-amber-200 text-amber-950 px-4 py-2.5 no-print shadow-2xs">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2.5">
+            <div className="w-5 h-5 rounded-md bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-2xs">
+              <AlertTriangle className="w-3.5 h-3.5" />
+            </div>
+            <div className="leading-snug">
+              <strong className="font-bold text-amber-950">BİLGİLENDİRME (Geliştirme &amp; Test Aşaması):</strong>{' '}
+              <span className="text-amber-900">
+                Uygulama aktif geliştirme ve test aşamasındadır. Üretilen baz çözümleri ve serbest ağ dengelemesi sonuçları nihai proje onayları öncesinde kontrol edilmeli ve doğrulanmalıdır.
+              </span>
+            </div>
+          </div>
+          <span className="shrink-0 text-[10px] font-mono font-bold bg-amber-200/80 text-amber-950 px-2 py-0.5 rounded border border-amber-300 hidden md:inline-block">
+            BETA SÜRÜM
+          </span>
+        </div>
+      </div>
 
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5">
@@ -867,10 +892,17 @@ export default function App() {
       )}
 
       {/* Footer */}
-      <footer className="bg-slate-900 border-t border-slate-800 py-4 mt-auto no-print text-center text-xs text-slate-400 font-medium tracking-wide">
-        <div className="max-w-7xl mx-auto px-4 flex items-center justify-center">
-          <div>
-            BSR Maps - Nirengi Hesabı v1.0
+      <footer className="bg-slate-900 border-t border-slate-800 py-5 mt-auto no-print text-xs text-slate-400">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 flex-wrap justify-center sm:justify-start">
+            <span className="font-bold text-slate-200">BSR Maps &bull; Nirengi Hesabı</span>
+            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+              Geliştirme Sürümü (Beta)
+            </span>
+            <span className="text-slate-500 text-[11px]">v1.0.0</span>
+          </div>
+          <div className="text-[11px] text-slate-400 text-center md:text-right max-w-2xl leading-relaxed">
+            GNSS ağ dengeleme algoritmaları aktif geliştirme ve doğrulama aşamasındadır. Resmi projelerde nihai onay kontrol mühendisine aittir.
           </div>
         </div>
       </footer>

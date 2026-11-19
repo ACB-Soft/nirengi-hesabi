@@ -2,8 +2,8 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  * 
- * 5. Faz: Resmi BÖHYY Dengeleme Hesap Karnesi, CAD & CBS Dışa Aktarım (DXF, KML, GeoJSON, Excel)
- * Kadastro Genel Müdürlüğü & BÖHYY Standartlarına Uygun Onay Karnesi
+ * 5. Faz: 3D Dengeleme Hesap Raporu, CAD & CBS Dışa Aktarım (DXF, KML, GeoJSON, Excel)
+ * GNSS Ağ Dengelemesi ve Doğruluk Raporu
  */
 
 import React, { useState } from 'react';
@@ -143,7 +143,7 @@ export const ReportExportTab: React.FC<Props> = ({
     if (!adjustmentResult) return;
     let reportTxt = `================================================================================\n`;
     reportTxt += `       TUREF / ITRF96 GNSS 3D AĞ DENGELEME VE HESAP RAPORU\n`;
-    reportTxt += `  (Büyük Ölçekli Harita ve Harita Bilgileri Üretim Yönetmeliği Standartlarında)\n`;
+    reportTxt += `  (3D Jeodezik Ağ Dengeleme Standartlarında Üretilmiştir)\n`;
     reportTxt += `================================================================================\n\n`;
 
     reportTxt += `PROJE BİLGİLERİ:\n`;
@@ -233,7 +233,7 @@ export const ReportExportTab: React.FC<Props> = ({
         <FileText className="w-12 h-12 text-slate-300 mx-auto" />
         <h3 className="text-base font-bold text-slate-800">Dengeleme Hesabı Henüz Çalıştırılmadı</h3>
         <p className="text-xs text-slate-500 max-w-md mx-auto">
-          Resmi BÖHYY dengeleme hesap karnesi ve CAD/CBS dışa aktarımı için &quot;Serbest Dengeleme&quot; sekmesinden çözümü çalıştırınız.
+          Dengeleme hesap raporu ve CAD/CBS dışa aktarımı için &quot;Serbest Dengeleme&quot; sekmesinden çözümü çalıştırınız.
           Mevcut nokta verilerinizi doğrudan CAD formatlarında indirebilirsiniz.
         </p>
         {Object.keys(stations).length > 0 && (
@@ -265,10 +265,10 @@ export const ReportExportTab: React.FC<Props> = ({
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <h2 className="text-lg font-extrabold text-slate-900">
-              Resmi Dengeleme Karnesi ve CAD/CBS Dışa Aktarım
+              Dengeleme Hesap Raporu ve CAD/CBS Dışa Aktarım
             </h2>
             <p className="text-xs text-slate-500 mt-1 max-w-2xl leading-relaxed">
-              BÖHYY standartlarında onaylanabilir resmi hesap karnesi; Netcad (.ncn/.baz/.dxf), Google Earth (.kml), GeoJSON ve Excel çıktıları.
+              3D ağ dengelemesi hesap raporu; Netcad (.ncn/.baz/.dxf), Google Earth (.kml), GeoJSON ve Excel çıktıları.
             </p>
           </div>
 
@@ -277,7 +277,7 @@ export const ReportExportTab: React.FC<Props> = ({
               onClick={handleExportZipArchive}
               disabled={isExportingZip}
               className="px-4 py-2.5 text-xs font-bold bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl shadow-xs transition cursor-pointer flex items-center gap-2"
-              title="Proje JSON, Ham RINEX (.obs/.nav) ve BÖHYY Raporunu tek bir HMAC-SHA256 korumalı .zip dosyasında arşivler"
+              title="Proje JSON, Ham RINEX (.obs/.nav) ve Dengeleme Raporunu tek bir HMAC-SHA256 korumalı .zip dosyasında arşivler"
             >
               {isExportingZip ? (
                 <>
@@ -435,11 +435,11 @@ export const ReportExportTab: React.FC<Props> = ({
                   <span>Excel &amp; Koordinatlar</span>
                 </span>
                 <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-purple-100 text-purple-800 font-bold">
-                  BÖHYY Resmi
+                  Dengeleme Çıktısı
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 leading-tight">
-                Çok sayfalı Excel karnesi, CSV koordinatlar ve resmi metin (.txt) raporu.
+                Çok sayfalı Excel karnesi, CSV koordinatlar ve metin (.txt) raporu.
               </p>
             </div>
             <div className="mt-3 grid grid-cols-3 gap-1">
@@ -484,14 +484,14 @@ export const ReportExportTab: React.FC<Props> = ({
       <div className="bg-white rounded-2xl shadow-md border border-slate-200 p-8 sm:p-10 space-y-6 text-slate-800 print:shadow-none print:border-none print:p-0">
         {/* Report Header */}
         <div className="text-center border-b-2 border-slate-900 pb-4 space-y-1">
-          <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">
-            T.C. ÇEVRE, ŞEHİRCİLİK VE İKLİM DEĞİŞİKLİĞİ BAKANLIĞI &bull; TAPU VE KADASTRO GENEL MÜDÜRLÜĞÜ
-          </div>
           <h1 className="text-xl sm:text-2xl font-black text-slate-900 uppercase tracking-tight">
-            GNSS 3D AĞ DENGELEME VE HESAP KARNESİ
+            GNSS 3D AĞ DENGELEME VE HESAP RAPORU
           </h1>
-          <div className="text-xs text-slate-600 font-medium">
-            Büyük Ölçekli Harita ve Harita Bilgileri Üretim Yönetmeliği (BÖHYY) Madde 18 &amp; 21 Standartlarında
+          <div className="text-xs text-slate-600 font-medium flex items-center justify-center gap-2 flex-wrap">
+            <span>3D Gauss-Markov Ağ Dengelemesi ve Doğruluk Değerlendirmesi</span>
+            <span className="text-[10px] bg-amber-100 text-amber-900 border border-amber-300 font-bold px-2 py-0.5 rounded">
+              Beta / Doğrulama Sürümü
+            </span>
           </div>
         </div>
 
@@ -556,15 +556,15 @@ export const ReportExportTab: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* BÖHYY Madde 18 & 21 Standartları Denetim Karnesi */}
+        {/* Jeodezik Ağ Doğruluk ve Kalite Kriterleri */}
         <div className="border border-slate-200 rounded-xl p-4 space-y-2 bg-gradient-to-r from-slate-50 to-indigo-50/30 print:bg-transparent">
           <div className="flex items-center justify-between border-b border-slate-200 pb-2">
             <span className="font-bold text-slate-900 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
               <Award className="w-4 h-4 text-indigo-700" />
-              <span>BÖHYY Madde 18 &amp; 21 Kalite Kriterleri Değerlendirme Tablosu</span>
+              <span>Jeodezik Ağ Kalite ve Doğruluk Kriterleri Tablosu</span>
             </span>
             <span className="text-[10px] font-semibold text-slate-600">
-              T.C. BÖHYY ve TUSAGA-Aktif Standartları
+              3D Ağ Doğruluk ve Güvenilirlik Kriterleri
             </span>
           </div>
 
@@ -628,7 +628,7 @@ export const ReportExportTab: React.FC<Props> = ({
                   <div className="font-mono text-slate-900 font-bold mt-1">
                     a_maks = {maxA.toFixed(1)} mm
                   </div>
-                  <span className="text-[10px] text-slate-500">BÖHYY Sınırı: a ≤ 30.0 mm</span>
+                  <span className="text-[10px] text-slate-500">Tolerans Sınırı: a ≤ 30.0 mm</span>
                 </div>
               );
             })()}
@@ -659,7 +659,7 @@ export const ReportExportTab: React.FC<Props> = ({
             <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wide">
               1. Dengelenmiş Nokta Koordinatları ve %95 Güven Aralıklı Hata Elipsleri
             </h3>
-            <span className="text-[10px] text-slate-500 font-mono">BÖHYY Toleransı: a &le; 30 mm</span>
+            <span className="text-[10px] text-slate-500 font-mono">Tolerans Sınırı: a &le; 30 mm</span>
           </div>
 
           <div className="overflow-x-auto border border-slate-200 rounded-xl">
@@ -782,6 +782,38 @@ export const ReportExportTab: React.FC<Props> = ({
           </div>
         </div>
 
+        {/* Table 2b: Excluded Outlier Baselines */}
+        {adjustmentResult.excludedBaselines && adjustmentResult.excludedBaselines.length > 0 && (
+          <div className="space-y-2">
+            <h3 className="text-xs font-bold text-amber-900 uppercase tracking-wide flex items-center gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+              <span>Ağ Dengelemesinden Otomatik Dışlanan Kaba Hatalı Bazlar ({adjustmentResult.excludedBaselines.length} Adet)</span>
+            </h3>
+            <div className="overflow-x-auto border border-amber-200 rounded-xl bg-amber-50/20">
+              <table className="w-full text-left text-[11px] border-collapse font-mono">
+                <thead>
+                  <tr className="bg-amber-100/60 text-amber-950 font-sans font-bold border-b border-amber-200">
+                    <th className="p-2">Dışlanan Baz ID</th>
+                    <th className="p-2">Güzergah</th>
+                    <th className="p-2 text-right">Uzunluk (m)</th>
+                    <th className="p-2">Dışlanma Gerekçesi (Baarda &amp; Döngü Kapanma)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-amber-100">
+                  {adjustmentResult.excludedBaselines.map((ex) => (
+                    <tr key={ex.baselineId} className="hover:bg-amber-50/50">
+                      <td className="p-2 font-sans font-bold text-rose-700">{ex.baselineId}</td>
+                      <td className="p-2 font-sans text-slate-800">{ex.fromId} &rarr; {ex.toId}</td>
+                      <td className="p-2 text-right">{(ex.length ?? 0).toFixed(3)}</td>
+                      <td className="p-2 font-sans text-rose-800 text-[11px] font-semibold">{ex.reason}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
         {/* Table 3: Loop Closures */}
         {loopClosures.length > 0 && (
           <div className="space-y-2">
@@ -796,7 +828,7 @@ export const ReportExportTab: React.FC<Props> = ({
                     <th className="p-2">Güzergah</th>
                     <th className="p-2 text-right">Çevre S (km)</th>
                     <th className="p-2 text-right">Kapanış w (mm)</th>
-                    <th className="p-2 text-right">BÖHYY Tolerans (mm)</th>
+                    <th className="p-2 text-right">Tolerans (mm)</th>
                     <th className="p-2 text-right">Bağıl Doğruluk</th>
                     <th className="p-2 text-center font-sans">Karar</th>
                   </tr>
@@ -827,30 +859,29 @@ export const ReportExportTab: React.FC<Props> = ({
           </div>
         )}
 
-        {/* Official Certification & Signature Box */}
+        {/* Certification & Signature Box */}
         <div className="pt-8 border-t-2 border-slate-900 space-y-6">
           <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-700 leading-relaxed font-sans">
-            <strong>BÖHYY Madde 18 &amp; 21 Uygunluk Beyanı:</strong> Yukarıda detayları verilen GNSS post-processing ve 
-            3D ağ dengelemesi hesapları; T.C. Büyük Ölçekli Harita ve Harita Bilgileri Üretim Yönetmeliği hükümlerine, 
-            TUSAGA-Aktif jeodezik standartlarına ve TMMOB Harita ve Kadastro Mühendisleri Odası mesleki kurallarına uygun olarak 
-            bilimsel 3D Gauss-Markov en küçük kareler yöntemiyle çözülmüş ve doğrulanmıştır.
+            <strong>Jeodezik Hesap ve Doğruluk Beyanı:</strong> Yukarıda detayları verilen GNSS post-processing ve 
+            3D ağ dengelemesi hesapları; bilimsel 3D Gauss-Markov en küçük kareler yöntemi ve jeodezik standartlara uygun olarak 
+            çözülmüş ve doğrulanmıştır.
           </div>
 
           <div className="grid grid-cols-2 pt-4 text-center text-xs font-sans">
             <div>
-              <div className="font-bold text-slate-900 text-sm">Hesaplayan Harita Mühendisi</div>
+              <div className="font-bold text-slate-900 text-sm">Hesaplayan Mühendis</div>
               <div className="text-slate-600 mt-0.5">{config.surveyor}</div>
-              <div className="text-[11px] text-slate-400">TMMOB HKMO Oda Sicil No: _________</div>
+              <div className="text-[11px] text-slate-400">Sicil / Belge No: _________</div>
               <div className="h-16 border-b border-dashed border-slate-400 w-52 mx-auto mt-2"></div>
               <div className="text-[10px] text-slate-400 mt-1 font-semibold uppercase">İmza &bull; Kaşe</div>
             </div>
 
             <div>
-              <div className="font-bold text-slate-900 text-sm">Kontrol Eden &bull; İdare / Kurum Yetkilisi</div>
-              <div className="text-slate-600 mt-0.5">{config.institution}</div>
-              <div className="text-[11px] text-slate-400">Onay Makamı</div>
+              <div className="font-bold text-slate-900 text-sm">Kontrol Eden / Onaylayan</div>
+              <div className="text-slate-600 mt-0.5">{config.checker || 'Kontrol Mühendisi'}</div>
+              <div className="text-[11px] text-slate-400">Proje Birimi</div>
               <div className="h-16 border-b border-dashed border-slate-400 w-52 mx-auto mt-2"></div>
-              <div className="text-[10px] text-slate-400 mt-1 font-semibold uppercase">İmza &bull; Resmi Mühür</div>
+              <div className="text-[10px] text-slate-400 mt-1 font-semibold uppercase">İmza &bull; Kaşe</div>
             </div>
           </div>
         </div>

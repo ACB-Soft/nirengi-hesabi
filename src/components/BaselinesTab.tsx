@@ -549,7 +549,16 @@ export const BaselinesTab: React.FC<Props> = ({
                             }`}
                           />
                         </td>
-                        <td className="py-2.5 px-3 font-bold text-slate-900">{b.id}</td>
+                        <td className="py-2.5 px-3 font-bold text-slate-900">
+                          <div className="flex items-center gap-1">
+                            <span>{b.id}</span>
+                            {b.exclusionReason && (
+                              <span className="text-[9px] bg-rose-100 text-rose-800 border border-rose-300 px-1 py-0.2 rounded font-sans font-bold" title={b.exclusionReason}>
+                                Dışlandı
+                              </span>
+                            )}
+                          </div>
+                        </td>
                         <td className="py-2.5 px-3 font-bold text-slate-800 font-sans">
                           {b.fromId} → {b.toId}
                         </td>
@@ -562,10 +571,15 @@ export const BaselinesTab: React.FC<Props> = ({
                         <td className="py-2.5 px-3 text-center">
                           <span
                             className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                              isFix ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-amber-100 text-amber-800 border border-amber-300'
+                              isFix
+                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                                : b.diagnostics?.includes('LC')
+                                ? 'bg-purple-100 text-purple-800 border border-purple-300'
+                                : 'bg-amber-100 text-amber-800 border border-amber-300'
                             }`}
+                            title={b.diagnostics}
                           >
-                            {b.solutionType}
+                            {b.diagnostics?.includes('LC') ? 'LC (Iono-Free)' : b.solutionType}
                           </span>
                         </td>
                         <td className="py-2.5 px-3 text-center text-slate-800 font-bold">

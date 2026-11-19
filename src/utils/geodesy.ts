@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  * 
  * Geodesy, ANTEX, Loop Closure & 3D Gauss-Markov Adjustment Engine
- * Full mathematical implementation conforming to TUREF / ITRF96, GRS80, BÖHYY & RTKLIB.
+ * Full mathematical implementation conforming to TUREF / ITRF96, GRS80 & RTKLIB.
  */
 
 import * as XLSX from 'xlsx';
@@ -770,7 +770,7 @@ export function parseAntexFile(antexText: string): Record<string, AntennaData> {
 
 /**
  * Converts calendar year, month, day, hour, minute into a decimal year (e.g. 2025.454)
- * conforming to IGS, HGM and BÖHYY geodetic epoch standards.
+ * conforming to IGS geodetic epoch standards.
  */
 export function computeDecimalYear(
   year: number,
@@ -1945,6 +1945,7 @@ export function perform3DNetworkAdjustment(
         isOutlier: boolean;
       }
     >();
+    let lastDesignA: number[][] = [];
 
     // Outlier screening loop (Baarda Data Snooping & iterative re-weighting)
     for (let outlierPass = 0; outlierPass <= maxOutlierPasses; outlierPass++) {
@@ -2034,6 +2035,7 @@ export function perform3DNetworkAdjustment(
           A[rowStart + 1][colTo + 1] = 1.0;
           A[rowStart + 2][colTo + 2] = 1.0;
         }
+        lastDesignA = A;
 
         // N = A^T P A, u = A^T P l
         const N: number[][] = Array.from({ length: numUnknowns }, () => Array(numUnknowns).fill(0));
@@ -2282,6 +2284,7 @@ export function perform3DNetworkAdjustment(
               fromId: target.fromId,
               toId: target.toId,
               reason: target.exclusionReason,
+              length: target.length,
               wScore: Math.round(worstW * 100) / 100,
               spatialV: Math.round(worstSpatialV * 10) / 10,
             });
@@ -2298,7 +2301,7 @@ export function perform3DNetworkAdjustment(
     nonZeroACount = 0;
     for (let r = 0; r < numObs; r++) {
       for (let c = 0; c < numUnknowns; c++) {
-        if (A[r] && A[r][c] !== 0) nonZeroACount++;
+        if (lastDesignA[r] && lastDesignA[r][c] !== 0) nonZeroACount++;
       }
     }
     const totalElements = numObs * numUnknowns;
@@ -2388,7 +2391,7 @@ export function perform3DNetworkAdjustment(
       const sigmaNorth_mm = Math.sqrt(varN) * 1000.0;
       const sigmaUp_mm = Math.sqrt(varU) * 1000.0;
 
-      // 95% confidence horizontal error ellipse (c = 2.4477, BÖHYY)
+      // 95% confidence horizontal error ellipse (c = 2.4477)
       const diffEN = varN - varE;
       const rootTerm = Math.sqrt(diffEN * diffEN + 4.0 * covEN * covEN);
       const semiMajorM = Math.sqrt(Math.max(1e-12, (varN + varE + rootTerm) / 2.0)) * 2.4477;
@@ -2504,7 +2507,7 @@ export function perform3DNetworkAdjustment(
 }
 
 // ============================================================================
-// EXCEL & REPORT GENERATOR (Kadastro & BÖHYY Standartları)
+// EXCEL & REPORT GENERATOR (3D Ağ Dengeleme Standartları)
 // ============================================================================
 
 export function exportAdjustmentToExcel(
@@ -2669,7 +2672,7 @@ export const DEFAULT_CONFIG: JobConfig = {
   projectName: 'GNSS Nirengi Ağı Dengeleme Projesi',
   surveyor: 'Harita Mühendisi',
   checker: 'Kontrol Mühendisi',
-  institution: 'T.C. Harita Genel Müdürlüğü',
+  institution: '',
   timeZone: 'GMT+03:00',
   crsSystem: 'TUREF-TM30',
   dom: 30, // Central Meridian for TM30 is 30°

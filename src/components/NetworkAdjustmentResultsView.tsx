@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  * 
  * DynAdjust 3D En Küçük Kareler Ağ Dengelemesi Sonuç ve Matris Teşhis Bileşeni (Faz 4)
- * Grounded in Geoscience Australia DynAdjust & BÖHYY Standards.
+ * Grounded in Geoscience Australia DynAdjust & Geodetic Standards.
  * Provides rigorous matrix diagnostics, exact Baarda w-test outlier analysis,
  * 3D error ellipsoids, 2D projection error ellipses, and interactive SVG visualization.
  */
@@ -52,6 +52,54 @@ export const NetworkAdjustmentResultsView: React.FC<Props> = ({
 
   return (
     <div className="space-y-4 animate-in fade-in">
+      {/* Top Adjustment Health & Outlier Rejection Status Banner */}
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+        <div className="p-3 bg-white border border-slate-200 rounded-xl shadow-xs">
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Birim Ölçü St. Sapması (σ₀)</span>
+          <div className="flex items-center gap-2 mt-1">
+            <span className={`text-lg font-black font-mono ${adjustmentResult.sigma0Aposteriori <= 2.5 ? 'text-emerald-600' : 'text-amber-600'}`}>
+              {adjustmentResult.sigma0Aposteriori.toFixed(4)}
+            </span>
+            <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+              adjustmentResult.sigma0Aposteriori <= 2.5 ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+            }`}>
+              {adjustmentResult.sigma0Aposteriori <= 2.5 ? 'Tolerans İçi' : 'Yüksek Varyans'}
+            </span>
+          </div>
+        </div>
+
+        <div className="p-3 bg-white border border-slate-200 rounded-xl shadow-xs">
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Serbestlik Derecesi (f)</span>
+          <div className="text-lg font-black font-mono text-slate-800 mt-1">
+            {adjustmentResult.dof} <span className="text-xs font-normal text-slate-500 font-sans">({adjustmentResult.totalObservations} ölçü, {adjustmentResult.totalUnknowns} bilinmeyen)</span>
+          </div>
+        </div>
+
+        <div className="p-3 bg-white border border-slate-200 rounded-xl shadow-xs">
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Karesel Düzeltmeler Toplamı [vPv]</span>
+          <div className="text-lg font-black font-mono text-indigo-700 mt-1">
+            {adjustmentResult.vPv.toFixed(4)}
+          </div>
+        </div>
+
+        <div className="p-3 bg-white border border-slate-200 rounded-xl shadow-xs">
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Kaba Hata Ayıklama Durumu</span>
+          <div className="flex items-center gap-1.5 mt-1">
+            {adjustmentResult.excludedBaselines && adjustmentResult.excludedBaselines.length > 0 ? (
+              <span className="text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md flex items-center gap-1">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                <span>{adjustmentResult.excludedBaselines.length} Kaba Hatalı Baz Dışlandı</span>
+              </span>
+            ) : (
+              <span className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md flex items-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Tüm Bazlar Temiz (|w| ≤ {config.wCrit})</span>
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+
       {/* Sub Navigation Bar */}
       <div className="flex border-b border-slate-200 space-x-2 sm:space-x-4 text-xs font-bold overflow-x-auto custom-scrollbar">
         <button
@@ -350,7 +398,49 @@ export const NetworkAdjustmentResultsView: React.FC<Props> = ({
 
       {/* SubTab 2: Residuals and Baarda w-test */}
       {selectedSubTab === 'residuals' && (
-        <div className="space-y-3">
+        <div className="space-y-4">
+          {/* Excluded Outliers Table Card */}
+          {adjustmentResult.excludedBaselines && adjustmentResult.excludedBaselines.length > 0 && (
+            <div className="p-4 bg-amber-50/80 border border-amber-300 rounded-xl space-y-3 shadow-2xs">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-700" />
+                  <h4 className="text-xs font-bold text-amber-950">
+                    Ağ Dengelemesinden Otomatik Dışlanan Kaba Hatalı Bazlar ({adjustmentResult.excludedBaselines.length} Baz)
+                  </h4>
+                </div>
+                <span className="text-[11px] text-amber-900 bg-amber-100 border border-amber-200 px-2.5 py-0.5 rounded-full font-bold">
+                  {adjustmentResult.outlierIterations ?? 1} İterasyonda Ayıklandı (Baarda w-Testi &amp; Döngü Testi)
+                </span>
+              </div>
+              <p className="text-[11px] text-amber-800 leading-relaxed">
+                Aşağıdaki baz hatları, serbest ağ dengelemesinde Baarda w-testi kritik eşiğini (|w| &gt; {config.wCrit}) aşırı derecede aştığı veya kapanma hatası kabul edilebilir sınırın üzerinde olduğu için ağ dengesini bozmaması amacıyla otomatik olarak dışlanmış ve kalan ağ tutarlı biçimde dengelenmiştir.
+              </p>
+              <div className="overflow-x-auto rounded-lg border border-amber-200 bg-white">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-amber-100/60 text-amber-950 font-bold border-b border-amber-200">
+                      <th className="py-2.5 px-3">Dışlanan Baz ID</th>
+                      <th className="py-2.5 px-3">Güzergah</th>
+                      <th className="py-2.5 px-3 text-right">Uzunluk (m)</th>
+                      <th className="py-2.5 px-3">Dışlanma Sebebi</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-amber-100 font-mono">
+                    {adjustmentResult.excludedBaselines.map((ex) => (
+                      <tr key={ex.baselineId} className="hover:bg-amber-50/40">
+                        <td className="py-2 px-3 font-bold font-sans text-rose-700">{ex.baselineId}</td>
+                        <td className="py-2 px-3 font-sans text-slate-800">{ex.fromId} &rarr; {ex.toId}</td>
+                        <td className="py-2 px-3 text-right text-slate-700">{(ex.length ?? 0).toFixed(2)}</td>
+                        <td className="py-2 px-3 font-sans text-rose-800 text-[11px] font-semibold">{ex.reason}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           <div className="overflow-x-auto rounded-xl border border-slate-200">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
@@ -451,7 +541,7 @@ export const NetworkAdjustmentResultsView: React.FC<Props> = ({
                     <th className="py-2.5 px-3 text-right">c (Düşey Eksen, mm)</th>
                     <th className="py-2.5 px-3 text-right">Azimut θ (Gon)</th>
                     <th className="py-2.5 px-3 text-right">Düşey σ_H (mm)</th>
-                    <th className="py-2.5 px-3 text-center">BÖHYY Kararı</th>
+                    <th className="py-2.5 px-3 text-center">Tolerans Kararı</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-mono">

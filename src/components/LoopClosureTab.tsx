@@ -52,7 +52,7 @@ export const LoopClosureTab: React.FC<Props> = ({
               Döngü Kapanış Analizi (Loop Closure)
             </h2>
             <p className="text-xs text-slate-500 mt-1">
-              Bağımsız 3D üçgen kapanışları ve BÖHYY bağıl tolerans denetimi.
+              Bağımsız 3D üçgen kapanışları ve jeodezik bağıl tolerans denetimi.
             </p>
           </div>
 

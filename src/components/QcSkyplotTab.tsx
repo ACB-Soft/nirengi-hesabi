@@ -379,7 +379,7 @@ export const QcSkyplotTab: React.FC<Props> = ({
               <div className="text-xl font-black font-mono tabular-nums text-indigo-700 mt-0.5">
                 {maskAngle}°
               </div>
-              <span className="text-[10px] text-indigo-600 font-semibold">BÖHYY standardı</span>
+              <span className="text-[10px] text-indigo-600 font-semibold">Jeodezik standart</span>
             </div>
           </div>
 
@@ -544,7 +544,7 @@ export const QcSkyplotTab: React.FC<Props> = ({
                   <div className="text-xs text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-200">
                     <span className="font-bold text-slate-800">Sinyal-Gürültü Oranı (SNR) Dağılımı:</span>
                     <p className="mt-0.5 text-slate-500">
-                      RTKLIB ve BÖHYY standartlarında 35 dB-Hz altındaki sinyaller çok yolluluk (multipath) ve faz kayması riskini artırır.
+                      Standart GNSS analizlerinde 35 dB-Hz altındaki sinyaller çok yolluluk (multipath) ve faz kayması riskini artırır.
                     </p>
                   </div>
 

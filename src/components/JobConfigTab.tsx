@@ -50,7 +50,7 @@ export const JobConfigTab: React.FC<Props> = ({ config, onChange, onResetDefault
               Proje Ayarları ve Jeodezik Parametreler
             </h2>
             <p className="text-xs text-slate-500 max-w-2xl leading-relaxed">
-              TUREF / ITRF96 referans sistemi, BÖHYY yönetmeliği ve Topcon & Trimble yazılım standartlarına uygun proje tanımları ve dengeleme toleransları.
+              TUREF / ITRF96 referans sistemi, jeodezik ağ kriterleri ve Topcon & Trimble yazılım standartlarına uygun proje tanımları ve dengeleme toleransları.
             </p>
           </div>
           <button
